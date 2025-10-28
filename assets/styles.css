@@ -1,1 +1,53 @@
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #0f172a; background:#f8fafc; }
+.page { min-height: 100vh; display: flex; flex-direction: column; }
+.topbar { display:flex; align-items:center; justify-content:space-between; padding: 14px 18px; background:#0f172a; color:#e2e8f0; }
+.topbar h1 { font-size: 18px; margin:0; }
+.top-actions { display:flex; gap:8px; }
+
+.grid { display:grid; gap: 14px; grid-template-columns: 1fr 1fr 1fr; padding: 14px; flex:1; }
+.card { background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:14px; box-shadow: 0 2px 6px rgba(0,0,0,.04); }
+.card h2 { margin: 0 0 10px; font-size: 16px; }
+.card h3 { margin: 12px 0 6px; font-size: 14px; }
+
+.form-grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+label { display:block; font-size: 12px; color:#334155; }
+input, textarea { width:100%; border:1px solid #cbd5e1; border-radius:12px; padding:8px; margin-top:6px; font: inherit; }
+textarea { resize: vertical; }
+.row { display:flex; gap:8px; }
+
+.btn { background:#0f172a; color:#fff; border:0; padding:8px 12px; border-radius:10px; cursor:pointer; }
+.btn:hover { background:#111827; }
+.btn-ghost { background:transparent; color:#0f172a; border:1px solid #cbd5e1; }
+.btn-ghost:hover { background:#f1f5f9; }
+
+.stats { margin-top:10px; padding:10px; background:#f8fafc; border:1px solid #e5e7eb; border-radius:12px; }
+.stat { display:flex; align-items:center; justify-content:space-between; padding:4px 0; }
+.guard b { color:#16a34a; }
+.guard.danger b { color:#dc2626; }
+
+.list { max-height: 60vh; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+.item { border:1px solid #e5e7eb; border-radius:12px; padding:10px; background:#fff; }
+.item.disabled { opacity:.6; }
+.item .title { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.item .meta { font-size: 12px; color:#475569; margin-top:4px; }
+.pill { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; color:#fff; font-size: 11px; }
+.pill.must { background:#059669; }
+.pill.strong { background:#65a30d; }
+.pill.consider { background:#d97706; }
+.pill.pass { background:#dc2626; }
+
+.info-grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+.info { border:1px solid #e5e7eb; border-radius:10px; padding:8px; background:#fff; }
+.info .k { font-size:11px; color:#64748b; }
+.info .v { font-weight:600; font-size: 16px; }
+
+.footer { padding:10px 14px; color:#64748b; font-size:12px; }
+
+.compliance { margin-bottom:10px; border:1px solid #e5e7eb; border-radius:12px; padding:10px; }
+.compliance.ok { background:#ecfdf5; border-color:#a7f3d0; }
+.compliance.warn { background:#fffbeb; border-color:#fde68a; }
+.comp-row { display:flex; align-items:center; justify-content:space-between; font-size:12px; padding:2px 0; }
+
+.hint { font-size:12px; color:#64748b; }
 
