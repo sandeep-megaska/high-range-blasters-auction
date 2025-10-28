@@ -1,1 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>High Range Blasters — Auction Assist</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body>
+  <div id="app" class="page">
+    <header class="topbar">
+      <h1>High Range Blasters — Auction Assist</h1>
+      <div class="top-actions">
+        <button id="btn-export" class="btn">Export Won (CSV)</button>
+        <button id="btn-reset" class="btn btn-ghost">Reset Session</button>
+      </div>
+    </header>
+
+    <main class="grid">
+      <!-- Left: Controls & Import -->
+      <section class="card">
+        <h2>Auction Controls</h2>
+        <div class="form-grid">
+          <label> Total Points
+            <input type="number" id="totalPoints" />
+          </label>
+          <label> Players Needed
+            <input type="number" id="playersNeeded" />
+          </label>
+          <label> Min Base / Player
+            <input type="number" id="minBasePerPlayer" />
+          </label>
+          <div class="row">
+            <button id="btn-shuffle" class="btn">Shuffle Queue</button>
+            <button id="btn-next" class="btn">Next Player</button>
+            <button id="btn-undo" class="btn btn-ghost">Undo</button>
+          </div>
+        </div>
+
+        <div class="stats">
+          <div class="stat"><span>Remaining Points</span><b id="remainingPoints">0</b></div>
+          <div class="stat"><span>Remaining Slots</span><b id="remainingSlots">0</b></div>
+          <div class="guard" id="guardrail">Guardrail: <b>OK</b></div>
+        </div>
+
+        <h3>Import / Export</h3>
+        <div class="import">
+          <label> Google Sheet CSV URL
+            <input id="csvUrl" placeholder="https://docs.google.com/.../pub?output=csv" />
+          </label>
+          <div class="row">
+            <button id="btn-fetch" class="btn">Fetch CSV</button>
+            <button id="btn-clear-url" class="btn btn-ghost">Clear</button>
+          </div>
+
+          <label> Paste CSV
+            <textarea id="csvPaste" rows="6" placeholder="name,role,grade,rating,base,batting_hand,is_wk"></textarea>
+          </label>
+          <div class="row">
+            <button id="btn-import" class="btn">Import</button>
+            <button id="btn-clear-paste" class="btn btn-ghost">Clear</button>
+          </div>
+
+          <p class="hint">
+            Tip: Google Sheets → File → Share → <b>Publish to the web</b> → format <b>CSV</b>, then paste the link above.
+            Add columns: <code>name, role, grade, rating, base, batting_hand(L/R), is_wk(TRUE/FALSE)</code>
+          </p>
+        </div>
+      </section>
+
+      <!-- Middle: Live Bid -->
+      <section class="card">
+        <h2>Live Bid</h2>
+        <div id="liveBid"></div>
+      </section>
+
+      <!-- Right: Players List -->
+      <section class="card">
+        <h2>Players <small id="playersCount"></small></h2>
+        <div id="complianceBar"></div>
+        <div class="list" id="playersList"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Session is saved locally in your browser. Optional cloud sync via Supabase.</span>
+    </footer>
+  </div>
+
+  <script type="module">
+    import "./assets/utils.js";
+    import "./assets/constraints.js";
+    import "./assets/supabaseClient.js";
+    import "./assets/app.js";
+  </script>
+</body>
+</html>
 
