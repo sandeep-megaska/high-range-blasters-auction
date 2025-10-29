@@ -9,213 +9,150 @@
 
 <body>
   <div id="app" class="page">
+
+    <!-- SINGLE HEADER (no duplicates) -->
     <header class="topbar">
-  <div class="brand">
-    <img src="/assets/highrange.svg" alt="High Range Blasters" class="brand-logo" />
-    <h1>High Range Blasters — Auction Assist</h1>
-  </div>
-  <div class="top-actions">
-    <button id="btn-export" class="btn">Export Won (CSV)</button>
-    <button id="btn-reset" class="btn btn-ghost">Reset Session</button>
-  </div>
-<header class="topbar">
-  <div class="brand">
-    <img src="/assets/logo.png" alt="High Range Blasters" class="brand-logo" />
-    <h1>High Range Blasters — Auction Assist</h1>
-  </div>
-  <div class="top-actions">
-    <button id="btn-export" class="btn">Export Won (CSV)</button>
-    <button id="btn-reset" class="btn btn-ghost">Reset Session</button>
-    <button id="btn-logout" class="btn btn-ghost" style="display:none">Logout</button>
-  </div>
-</header>
-
+      <div class="brand">
+        <!-- Use your svg or png here -->
+        <img src="/assets/highrange.svg" alt="High Range Blasters" class="brand-logo" />
+        <h1>High Range Blasters — Auction Assist</h1>
+      </div>
+      <div class="top-actions">
+        <button id="btn-export" class="btn">Export Won (CSV)</button>
+        <button id="btn-reset" class="btn btn-ghost">Reset Session</button>
+        <button id="btn-logout" class="btn btn-ghost" style="display:none">Logout</button>
+      </div>
     </header>
-<!-- LOGIN VIEW -->
-<section id="loginView" class="card modal" style="display:none">
-  <h2>Login</h2>
-  <p class="hint">Enter your credentials to start the auction.</p>
-  <div class="form-grid">
-    <label> Username
-      <input id="loginUser" placeholder="HRB" />
-    </label>
-    <label> Password
-      <input id="loginPass" type="password" placeholder="sandeep" />
-    </label>
-  </div>
-  <div class="row" style="margin-top:10px;">
-    <button id="btn-login" class="btn">Login</button>
-    <div id="loginError" class="hint" style="color:#dc2626;margin-left:8px;"></div>
-  </div>
-</section>
 
-<!-- PRE-BID SETTINGS VIEW -->
-<section id="settingsView" class="card modal" style="display:none">
-  <h2>Pre-Bid Settings</h2>
-  <p class="hint">Configure roster size and budget before bidding begins.</p>
-  <div class="form-grid">
-    <label> Number of Players (max)
-      <input type="number" id="cfgPlayersCap" placeholder="15" />
-    </label>
-    <label> Overall Points
-      <input type="number" id="cfgTotalPoints" placeholder="15000" />
-    </label>
-    <label> Preselected Player (Name)
-      <input id="cfgPreName" placeholder="Exact name as in list (optional)" />
-    </label>
-    <label> Preselected Player Bid Points
-      <input type="number" id="cfgPreBid" placeholder="e.g. 1200" />
-    </label>
-  </div>
-  <div class="stats" style="margin-top:10px;">
-    <div class="stat">
-      <span>Available Score (after preselected deduction)</span>
-      <b id="cfgAvailableScore">—</b>
-    </div>
-  </div>
-  <div class="row" style="margin-top:10px;">
-    <button id="btn-save-settings" class="btn">Save & Start</button>
-    <div id="settingsError" class="hint" style="color:#dc2626;margin-left:8px;"></div>
-  </div>
-</section>
-
-
-    <main class="grid">
-  <!-- LEFT: Controls -->
-  <section class="card">
-    <h2>Auction Controls</h2>
-    <div class="form-grid">
-      <label> Total Points
-        <input type="number" id="totalPoints" />
-      </label>
-      <label> Players Needed
-        <input type="number" id="playersNeeded" />
-      </label>
-      <label> Min Base / Player
-        <input type="number" id="minBasePerPlayer" />
-      </label>
-      <div class="row">
-        <button id="btn-shuffle" class="btn">Shuffle Queue</button>
-        <button id="btn-next" class="btn">Next Player</button>
-        <button id="btn-undo" class="btn btn-ghost">Undo</button>
+    <!-- LOGIN VIEW (shown first) -->
+    <section id="loginView" class="card modal" style="display:none">
+      <h2>Login</h2>
+      <p class="hint">Enter your credentials to start the auction.</p>
+      <div class="form-grid">
+        <label> Username
+          <input id="loginUser" placeholder="HRB" />
+        </label>
+        <label> Password
+          <input id="loginPass" type="password" placeholder="sandeep" />
+        </label>
       </div>
-    </div>
-
-    <div class="stats">
-      <div class="stat"><span>Remaining Points</span><b id="remainingPoints">0</b></div>
-      <div class="stat"><span>Remaining Slots</span><b id="remainingSlots">0</b></div>
-      <div class="guard" id="guardrail">Guardrail: <b>OK</b></div>
-    </div>
-
-    <h3>Import / Export</h3>
-    <div class="import">
-      <label> Google Sheet CSV URL
-        <input id="csvUrl" placeholder="https://docs.google.com/.../pub?output=csv" />
-      </label>
-      <div class="row">
-        <button id="btn-fetch" class="btn">Fetch CSV</button>
-        <button id="btn-clear-url" class="btn btn-ghost">Clear</button>
+      <div class="row" style="margin-top:10px;">
+        <button id="btn-login" class="btn">Login</button>
+        <div id="loginError" class="hint" style="color:#dc2626;margin-left:8px;"></div>
       </div>
+    </section>
 
-      <label> Paste CSV
-        <textarea id="csvPaste" rows="6"
-          placeholder="name,dob,alumni,age,category,role,grade,rating,base,batting_hand,is_wk"></textarea>
-      </label>
-      <div class="row">
-        <button id="btn-import" class="btn">Import</button>
-        <button id="btn-clear-paste" class="btn btn-ghost">Clear</button>
+    <!-- PRE-BID SETTINGS (after login) -->
+    <section id="settingsView" class="card modal" style="display:none">
+      <h2>Pre-Bid Settings</h2>
+      <p class="hint">Configure roster size and budget before bidding begins.</p>
+      <div class="form-grid">
+        <label> Number of Players (max)
+          <input type="number" id="cfgPlayersCap" placeholder="15" />
+        </label>
+        <label> Overall Points
+          <input type="number" id="cfgTotalPoints" placeholder="15000" />
+        </label>
+        <label> Preselected Player (Name)
+          <input id="cfgPreName" placeholder="Exact name as in list (optional)" />
+        </label>
+        <label> Preselected Player Bid Points
+          <input type="number" id="cfgPreBid" placeholder="e.g. 1200" />
+        </label>
       </div>
+      <div class="stats" style="margin-top:10px;">
+        <div class="stat">
+          <span>Available Score (after preselected deduction)</span>
+          <b id="cfgAvailableScore">—</b>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button id="btn-save-settings" class="btn">Save & Start</button>
+        <div id="settingsError" class="hint" style="color:#dc2626;margin-left:8px;"></div>
+      </div>
+    </section>
 
-      <p class="hint">
-        Tip: Google Sheets → File → Share → <b>Publish to the web</b> → CSV, then paste here.
-      </p>
-    </div>
-  </section>
+    <!-- MAIN APP (hidden until settings saved) -->
+    <main id="appMain" class="grid" style="display:none">
+      <!-- LEFT: Controls -->
+      <section class="card">
+        <h2>Auction Controls</h2>
+        <div class="form-grid">
+          <label> Total Points
+            <input type="number" id="totalPoints" />
+          </label>
+          <label> Players Needed
+            <input type="number" id="playersNeeded" />
+          </label>
+          <label> Min Base / Player
+            <input type="number" id="minBasePerPlayer" />
+          </label>
+          <div class="row">
+            <button id="btn-shuffle" class="btn">Shuffle Queue</button>
+            <button id="btn-next" class="btn">Next Player</button>
+            <button id="btn-undo" class="btn btn-ghost">Undo</button>
+          </div>
+        </div>
 
-  <!-- MIDDLE: Live Bid + Selected Squad -->
-  <section class="card">
-    <h2>Live Bid</h2>
-    <div id="liveBid"></div>
+        <div class="stats">
+          <div class="stat"><span>Remaining Points</span><b id="remainingPoints">0</b></div>
+          <div class="stat"><span>Remaining Slots</span><b id="remainingSlots">0</b></div>
+          <div class="guard" id="guardrail">Guardrail: <b>OK</b></div>
+        </div>
 
-    <h2 style="margin-top:14px">Selected Squad</h2>
-    <div id="selectedList"></div>
-  </section>
+        <h3>Import / Export</h3>
+        <div class="import">
+          <label> Google Sheet CSV URL
+            <input id="csvUrl" placeholder="https://docs.google.com/.../pub?output=csv" />
+          </label>
+          <div class="row">
+            <button id="btn-fetch" class="btn">Fetch CSV</button>
+            <button id="btn-clear-url" class="btn btn-ghost">Clear</button>
+          </div>
 
-  <!-- RIGHT: Players -->
-  <section class="card">
-    <h2>Players <small id="playersCount"></small></h2>
-    <div id="complianceBar"></div>
-    <div class="list" id="playersList"></div>
-  </section>
-</main>
+          <label> Paste CSV
+            <textarea id="csvPaste" rows="6"
+              placeholder="name,dob,alumni,age,category,role,grade,rating,base,batting_hand,is_wk"></textarea>
+          </label>
+          <div class="row">
+            <button id="btn-import" class="btn">Import</button>
+            <button id="btn-clear-paste" class="btn btn-ghost">Clear</button>
+          </div>
 
+          <p class="hint">
+            Tip: Google Sheets → File → Share → <b>Publish to the web</b> → CSV, then paste here.
+          </p>
+        </div>
+      </section>
+
+      <!-- MIDDLE: Live Bid + Selected Squad -->
+      <section class="card">
+        <h2>Live Bid</h2>
+        <div id="liveBid"></div>
+
+        <h2 style="margin-top:14px">Selected Squad</h2>
+        <div id="selectedList"></div>
+      </section>
+
+      <!-- RIGHT: Players -->
+      <section class="card">
+        <h2>Players <small id="playersCount"></small></h2>
+        <div id="complianceBar"></div>
+        <div class="list" id="playersList"></div>
+      </section>
+    </main>
 
     <footer class="footer">
       <span>Session is saved locally in your browser. Optional cloud sync via Supabase.</span>
     </footer>
   </div>
 
+  <!-- IMPORTANT: keep ONLY script imports here (no HTML inside this tag) -->
   <script type="module">
     import "./assets/utils.js";
     import "./assets/constraints.js";
     import "./assets/supabaseClient.js";
     import "./assets/app.js";
-    <!-- LOGIN OVERLAY -->
-<div id="authGate" class="overlay hidden">
-  <div class="modal">
-    <h2>Sign in</h2>
-    <p class="hint">Enter the auction console</p>
-    <label> Username
-      <input id="loginUser" placeholder="HRB" />
-    </label>
-    <label> Password
-      <input id="loginPass" type="password" placeholder="••••••••" />
-    </label>
-    <div class="row">
-      <button id="btnLogin" class="btn">Login</button>
-    </div>
-    <div id="loginError" class="error"></div>
-  </div>
-</div>
-
-<!-- PRE-BID SETTINGS OVERLAY -->
-<div id="setupPanel" class="overlay hidden">
-  <div class="modal">
-    <h2>Bid Settings</h2>
-    <p class="hint">Configure roster & points before starting</p>
-
-    <div class="form-grid">
-      <label> Total Points (overall)
-        <input type="number" id="setupTotalPoints" value="15000" />
-      </label>
-      <label> Players to Bid (max 15)
-        <input type="number" id="setupPlayersNeeded" value="15" />
-      </label>
-      <label> Preselected Player (name)
-        <input id="setupPreName" placeholder="Type exact player name (optional)" />
-      </label>
-      <label> Preselected Player Cost
-        <input type="number" id="setupPreCost" value="0" />
-      </label>
-      <label class="row" style="align-items:center; gap:8px;">
-        <input type="checkbox" id="setupPreCounts" checked />
-        <span>Count preselected player towards roster</span>
-      </label>
-    </div>
-
-    <div class="stats" style="margin-top:10px;">
-      <div class="stat"><span>Available Points (after preselected)</span><b id="setupAvail">15000</b></div>
-    </div>
-
-    <div class="row" style="margin-top:10px;">
-      <button id="btnSetupStart" class="btn">Start Auction</button>
-      <button id="btnSetupSkip" class="btn btn-ghost">Skip (use defaults)</button>
-    </div>
-    <div id="setupNote" class="hint"></div>
-  </div>
-</div>
-
   </script>
 </body>
 </html>
-
