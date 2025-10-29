@@ -1,6 +1,4 @@
-// assets/app.js
-// High Range Blasters — Auction Assist (no-build, vanilla JS)
-
+// assets/app.js — Full file
 import {
   STORAGE_KEY,
   SAMPLE_CSV,
@@ -22,31 +20,68 @@ import {
   loadSettingsFromSupabase
 } from "./supabaseClient.js";
 
+// ---------- Auth (hardcoded) ----------
+const AUTH_USER = "HRB";
+const AUTH_PASS = "sandeep";
+
 // ---------- Global state ----------
 let state = {
-  players: [],            // {id,name,role,grade,rating,base,batting_hand,is_wk,status,finalBid,dob,alumni,age,category}
-  queue: [],              // ids of pending players
+  // app
+  players: [],
+  queue: [],
   totalPoints: 1000,
   playersNeeded: 6,
   minBasePerPlayer: 50,
   activeId: null,
-  log: [],               // [{type:"won"/"lost", id, bid?}]
-  constraints: DEFAULT_CONSTRAINTS
+  log: [],
+  constraints: DEFAULT_CONSTRAINTS,
+
+  // auth + setup
+  auth: { loggedIn: false },
+  setup: {
+    done: false,
+    playersCap: 15,
+    overallPoints: 15000,
+    preselectedName: "",
+    preselectedBid: 0
+  }
 };
 
 // ---------- DOM refs ----------
 const $ = (sel) => document.querySelector(sel);
-const liveBidEl = $("#liveBid");
-const playersListEl = $("#playersList");
-const playersCountEl = $("#playersCount");
-const remainingPointsEl = $("#remainingPoints");
-const remainingSlotsEl = $("#remainingSlots");
-const guardrailEl = $("#guardrail");
-const csvUrlEl = $("#csvUrl");
-const csvPasteEl = $("#csvPaste");
-const complianceBarEl = $("#complianceBar");
 
-// Controls listeners
+// Views
+const appMain = $("#appMain");
+const loginView = $("#loginView");
+const settingsView = $("#settingsView");
+
+// Login form
+const loginUser = $("#loginUser");
+const loginPass = $("#loginPass");
+const loginError = $("#loginError");
+$("#btn-login")?.addEventListener("click", onLogin);
+
+// Settings form
+const cfgPlayersCap = $("#cfgPlayersCap");
+const cfgTotalPoints = $("#cfgTotalPoints");
+const cfgPreName = $("#cfgPreName");
+const cfgPreBid = $("#cfgPreBid");
+const cfgAvailableScore = $("#cfgAvailableScore");
+const settingsError = $("#settingsError");
+$("#btn-save-settings")?.addEventListener("click", onSaveSettings);
+[cfgPlayersCap, cfgTotalPoints, cfgPreBid]?.forEach(el => {
+  el?.addEventListener("input", updateAvailableScorePreview);
+});
+
+// Header buttons
+$("#btn-logout")?.addEventListener("click", onLogout);
+$("#btn-export")?.addEventListener("click", () => exportWon());
+$("#btn-reset")?.addEventListener("click", () => {
+  localStorage.removeItem(STORAGE_KEY);
+  location.reload();
+});
+
+// Controls (left card)
 $("#totalPoints")?.addEventListener("change", e => {
   state.totalPoints = toNum(e.target.value, 0);
   persist(); render();
@@ -59,36 +94,147 @@ $("#minBasePerPlayer")?.addEventListener("change", e => {
   state.minBasePerPlayer = toNum(e.target.value, 0);
   persist(); render();
 });
-
 $("#btn-shuffle")?.addEventListener("click", () => randomizeQueue());
 $("#btn-next")?.addEventListener("click", () => nextPlayer());
 $("#btn-undo")?.addEventListener("click", () => undo());
 
+// Import/export (left card)
+const csvUrlEl = $("#csvUrl");
+const csvPasteEl = $("#csvPaste");
 $("#btn-fetch")?.addEventListener("click", () => importFromCsvUrl());
 $("#btn-clear-url")?.addEventListener("click", () => { csvUrlEl.value = ""; });
-
 $("#btn-import")?.addEventListener("click", () => importFromPaste());
 $("#btn-clear-paste")?.addEventListener("click", () => { csvPasteEl.value = ""; });
 
-$("#btn-export")?.addEventListener("click", () => exportWon());
-$("#btn-reset")?.addEventListener("click", () => {
-  localStorage.removeItem(STORAGE_KEY);
-  location.reload();
-});
+// Right/Middle refs
+const liveBidEl = $("#liveBid");
+const playersListEl = $("#playersList");
+const playersCountEl = $("#playersCount");
+const remainingPointsEl = $("#remainingPoints");
+const remainingSlotsEl = $("#remainingSlots");
+const guardrailEl = $("#guardrail");
+const complianceBarEl = $("#complianceBar");
 
 // ---------- Init ----------
-load();          // load from localStorage or seed from SAMPLE_CSV
-render();        // initial render
-warmloadSupabase(); // optional: pull settings/constraints from Supabase (if configured)
+load();
+routeViews();     // decide which view to show
+if (state.auth.loggedIn && state.setup.done) {
+  render();
+  warmloadSupabase();
+}
+
+// ---------- View routing ----------
+function routeViews(){
+  const logged = !!state.auth.loggedIn;
+  const setupDone = !!state.setup.done;
+
+  // Logout button visibility
+  const logoutBtn = $("#btn-logout");
+  if (logoutBtn) logoutBtn.style.display = logged ? "inline-block" : "none";
+
+  if (!logged) {
+    show(loginView); hide(settingsView); hide(appMain);
+    // Default credentials prefill (optional)
+    if (loginUser) loginUser.value = AUTH_USER;
+    if (loginPass) loginPass.value = AUTH_PASS;
+    loginError.textContent = "";
+    return;
+  }
+  if (logged && !setupDone) {
+    // Prefill settings with saved or sensible defaults
+    if (cfgPlayersCap) cfgPlayersCap.value = state.setup.playersCap ?? 15;
+    if (cfgTotalPoints) cfgTotalPoints.value = state.setup.overallPoints ?? 15000;
+    if (cfgPreName) cfgPreName.value = state.setup.preselectedName ?? "";
+    if (cfgPreBid) cfgPreBid.value = state.setup.preselectedBid ?? 0;
+    updateAvailableScorePreview();
+    show(settingsView); hide(loginView); hide(appMain);
+    return;
+  }
+  // logged + setup done
+  show(appMain); hide(loginView); hide(settingsView);
+}
+
+function show(el){ if (el) el.style.display = ""; }
+function hide(el){ if (el) el.style.display = "none"; }
+
+// ---------- Auth handlers ----------
+function onLogin(){
+  const u = (loginUser?.value || "").trim();
+  const p = (loginPass?.value || "").trim();
+  if (u === AUTH_USER && p === AUTH_PASS) {
+    state.auth.loggedIn = true;
+    persist();
+    routeViews();
+  } else {
+    if (loginError) loginError.textContent = "Invalid username or password.";
+  }
+}
+function onLogout(){
+  // Keep players/settings if you want; here we just flip auth
+  state.auth.loggedIn = false;
+  persist();
+  routeViews();
+}
+
+// ---------- Settings handlers ----------
+function updateAvailableScorePreview(){
+  const total = toNum(cfgTotalPoints?.value, 15000);
+  const preBid = toNum(cfgPreBid?.value, 0);
+  if (cfgAvailableScore) cfgAvailableScore.textContent = Math.max(0, total - preBid);
+}
+
+function onSaveSettings(){
+  settingsError.textContent = "";
+
+  const playersCap = toNum(cfgPlayersCap?.value, 15);
+  const overallPoints = toNum(cfgTotalPoints?.value, 15000);
+  const preName = (cfgPreName?.value || "").trim();
+  const preBid = toNum(cfgPreBid?.value, 0);
+
+  if (playersCap <= 0 || overallPoints <= 0) {
+    settingsError.textContent = "Enter positive values for players and points.";
+    return;
+  }
+  if (preBid < 0) {
+    settingsError.textContent = "Preselected bid cannot be negative.";
+    return;
+  }
+
+  // Apply to app state
+  state.setup.playersCap = playersCap;
+  state.setup.overallPoints = overallPoints;
+  state.setup.preselectedName = preName;
+  state.setup.preselectedBid = preBid;
+  state.setup.done = true;
+
+  // Map settings → working controls
+  state.totalPoints = overallPoints;
+  state.playersNeeded = playersCap;
+
+  // If preselected provided, try to mark as WON at given bid
+  if (preName && preBid > 0) {
+    const target = state.players.find(p => (p.name || "").trim().toLowerCase() === preName.toLowerCase());
+    if (target && target.status === "pending") {
+      // Use internal markWon (this logs and recomputes guardrails automatically)
+      state.players = state.players.map(p => p.id===target.id ? { ...p, status:"won", finalBid: preBid } : p);
+      state.log.push({ type:"won", id: target.id, bid: preBid });
+    } else {
+      // If not found, we still proceed; user can correct name later
+      settingsError.textContent = "Note: preselected player name not found; no player was marked won.";
+    }
+  }
+
+  persist();
+  routeViews();   // go to app
+  render();       // first render with applied settings
+}
 
 // ---------- Load / Save ----------
 function load(){
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      state = { ...state, ...JSON.parse(raw) };
-    }
-    // Ensure we always have players
+    if (raw) state = { ...state, ...JSON.parse(raw) };
+    // Always ensure players exist
     if (!state.players || !Array.isArray(state.players) || state.players.length === 0){
       state.players = parseCSV(SAMPLE_CSV);
       state.queue = shuffle(state.players.map(p=>p.id));
@@ -100,7 +246,7 @@ function load(){
     state.activeId = null;
   }
 
-  // Reflect state into inputs
+  // Reflect to left-card inputs (when visible)
   const tp = $("#totalPoints"), pn = $("#playersNeeded"), mb = $("#minBasePerPlayer");
   if (tp) tp.value = state.totalPoints;
   if (pn) pn.value = state.playersNeeded;
@@ -122,9 +268,7 @@ async function warmloadSupabase(){
     const c = await loadConstraintsFromSupabase(team);
     if (c && c.length) state.constraints = c;
     persist(); render();
-  } catch {
-    // ignore optional Supabase errors for MVP
-  }
+  } catch { /* ignore */ }
 }
 
 function persist(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -182,7 +326,6 @@ function undo(){
   }
   persist(); render();
 }
-
 function updatePlayer(id, patch){
   state.players = state.players.map(p => p.id===id ? { ...p, ...patch } : p);
   persist(); render();
@@ -242,7 +385,8 @@ function exportWon(){
 
 // ---------- Rendering ----------
 function render(){
-  // header stats
+  if (!appMain || appMain.style.display === "none") return;
+
   if (remainingPointsEl) remainingPointsEl.textContent = remainingPoints();
   if (remainingSlotsEl) remainingSlotsEl.textContent = remainingSlots();
   if (guardrailEl) {
@@ -250,7 +394,6 @@ function render(){
     guardrailEl.innerHTML = `Guardrail: <b>${guardrailOK(0) ? "OK" : "At Risk"}</b>`;
   }
 
-  // players list + compliance + live bid + selected
   if (playersCountEl) playersCountEl.textContent = `(${state.players.length})`;
   renderCompliance();
   renderPlayersList();
@@ -315,7 +458,6 @@ function renderPlayersList(){
       </div>
     `;
 
-    // wire actions
     div.querySelector("[data-action='set-active']")?.addEventListener("click", () => {
       state.activeId = p.id; persist(); render();
     });
@@ -340,7 +482,6 @@ function renderPlayersList(){
 
 function renderLiveBid() {
   if (!liveBidEl) return;
-
   const p = state.players.find(x => x.id === state.activeId);
   if (!p) {
     liveBidEl.innerHTML = `<div class="hint">No active player. Click <b>Next Player</b> to start.</div>`;
@@ -402,7 +543,6 @@ function renderLiveBid() {
     </div>
   `;
 
-  // wire bid interactions
   const bidInput = document.getElementById("yourBid");
   const warn = document.getElementById("guardWarn");
   function validate(){
