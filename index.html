@@ -31,6 +31,53 @@
 </header>
 
     </header>
+<!-- LOGIN VIEW -->
+<section id="loginView" class="card modal" style="display:none">
+  <h2>Login</h2>
+  <p class="hint">Enter your credentials to start the auction.</p>
+  <div class="form-grid">
+    <label> Username
+      <input id="loginUser" placeholder="HRB" />
+    </label>
+    <label> Password
+      <input id="loginPass" type="password" placeholder="sandeep" />
+    </label>
+  </div>
+  <div class="row" style="margin-top:10px;">
+    <button id="btn-login" class="btn">Login</button>
+    <div id="loginError" class="hint" style="color:#dc2626;margin-left:8px;"></div>
+  </div>
+</section>
+
+<!-- PRE-BID SETTINGS VIEW -->
+<section id="settingsView" class="card modal" style="display:none">
+  <h2>Pre-Bid Settings</h2>
+  <p class="hint">Configure roster size and budget before bidding begins.</p>
+  <div class="form-grid">
+    <label> Number of Players (max)
+      <input type="number" id="cfgPlayersCap" placeholder="15" />
+    </label>
+    <label> Overall Points
+      <input type="number" id="cfgTotalPoints" placeholder="15000" />
+    </label>
+    <label> Preselected Player (Name)
+      <input id="cfgPreName" placeholder="Exact name as in list (optional)" />
+    </label>
+    <label> Preselected Player Bid Points
+      <input type="number" id="cfgPreBid" placeholder="e.g. 1200" />
+    </label>
+  </div>
+  <div class="stats" style="margin-top:10px;">
+    <div class="stat">
+      <span>Available Score (after preselected deduction)</span>
+      <b id="cfgAvailableScore">—</b>
+    </div>
+  </div>
+  <div class="row" style="margin-top:10px;">
+    <button id="btn-save-settings" class="btn">Save & Start</button>
+    <div id="settingsError" class="hint" style="color:#dc2626;margin-left:8px;"></div>
+  </div>
+</section>
 
 
     <main class="grid">
