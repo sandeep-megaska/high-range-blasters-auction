@@ -298,73 +298,58 @@ function renderPlayersList(){
   });
 }
 
-function renderLiveBid(){
-  const p = state.players.find(x => x.id === state.activeId);
-  if (!p) {
+function renderLiveBid() {
+  const liveBidEl = document.getElementById("liveBid");
+  if (!liveBidEl) return;
+
+  const active = state.players.find(p => p.id === state.activeId);
+  if (!active) {
     liveBidEl.innerHTML = `<div class="hint">No active player. Click <b>Next Player</b> to start.</div>`;
     return;
   }
-  const score = computeValueScore(p, state.players, state.constraints);
-  const tier = tierFromScore(score);
+
+  const p = active;
+  const { valueScore: score, tier } = computePlayerTier(p);
+
+  const basicMeta = [
+    p.role,
+    `Grade ${p.grade}`,
+    `Rating ${p.rating}`,
+    p.is_wk ? "WK" : null,
+    p.batting_hand ? `${p.batting_hand}-hand` : null
+  ].filter(Boolean).join(" • ");
+
+  const extraMeta = [
+    p.category ? `Category: ${p.category}` : null,
+    p.alumni ? `Alumni: ${p.alumni}` : null,
+    p.dob ? `DOB: ${p.dob}` : null,
+    (p.age ? `Age: ${p.age}` : null)
+  ].filter(Boolean).join(" • ");
+
   liveBidEl.innerHTML = `
     <div class="item">
       <div class="title">
         <div>
           <div style="font-size:18px;font-weight:600">${p.name}</div>
-          const basicMeta = [
-  p.role,
-  `Grade ${p.grade}`,
-  `Rating ${p.rating}`,
-  p.is_wk ? "WK" : null,
-  p.batting_hand ? `${p.batting_hand}-hand` : null
-].filter(Boolean).join(" • ");
-
-const extraMeta = [
-  p.category ? `Category: ${p.category}` : null,
-  p.alumni ? `Alumni: ${p.alumni}` : null,
-  p.dob ? `DOB: ${p.dob}` : null,
-  Number.isFinite(p.age) ? `Age: ${p.age}` : null
-].filter(Boolean).join(" • ");
-
-liveBidEl.innerHTML = `
-  <div class="item">
-    <div class="title">
-      <div>
-        <div style="font-size:18px;font-weight:600">${p.name}</div>
-        <div class="meta">${basicMeta}</div>
-        ${extraMeta ? `<div class="meta" style="margin-top:2px">${extraMeta}</div>` : ``}
-      </div>
-      <div class="${tier.class}"><span>${tier.label}</span><span>•</span><span>${score.toFixed(1)}</span></div>
-    </div>
-    <div class="info-grid" style="margin-top:8px;">
-      <div class="info"><div class="k">Base</div><div class="v">${p.base}</div></div>
-      <div class="info"><div class="k">Value Score</div><div class="v">${score.toFixed(1)}</div></div>
-    </div>
-    <div class="row" style="margin-top:8px;">
-      <label style="flex:1">Your Bid
-        <input type="number" id="yourBid" value="${p.base}" />
-        <div id="guardWarn" class="hint"></div>
-      </label>
-      <div class="col">
-        <button id="btn-bid-base" class="btn">Bid Base</button>
-        <button id="btn-plus10" class="btn btn-ghost">+10</button>
-      </div>
-    </div>
-    <div class="row" style="margin-top:8px;">
-      <button id="btn-mark-won" class="btn">Mark Won</button>
-      <button id="btn-pass" class="btn btn-ghost">Pass</button>
-      <button id="btn-skip" class="btn btn-ghost">Skip / Next</button>
-    </div>
-  </div>
-`;
-
+          <div class="meta">${basicMeta}</div>
+          ${extraMeta ? `<div class="meta" style="margin-top:2px">${extraMeta}</div>` : ``}
         </div>
-        <div class="${tier.class}"><span>${tier.label}</span><span>•</span><span>${score.toFixed(1)}</span></div>
+        <div class="${tier.class}">
+          <span>${tier.label}</span><span>•</span><span>${score.toFixed(1)}</span>
+        </div>
       </div>
+
       <div class="info-grid" style="margin-top:8px;">
-        <div class="info"><div class="k">Base</div><div class="v">${p.base}</div></div>
-        <div class="info"><div class="k">Value Score</div><div class="v">${score.toFixed(1)}</div></div>
+        <div class="info">
+          <div class="k">Base</div>
+          <div class="v">${p.base}</div>
+        </div>
+        <div class="info">
+          <div class="k">Value Score</div>
+          <div class="v">${score.toFixed(1)}</div>
+        </div>
       </div>
+
       <div class="row" style="margin-top:8px;">
         <label style="flex:1">Your Bid
           <input type="number" id="yourBid" value="${p.base}" />
@@ -375,6 +360,7 @@ liveBidEl.innerHTML = `
           <button id="btn-plus10" class="btn btn-ghost">+10</button>
         </div>
       </div>
+
       <div class="row" style="margin-top:8px;">
         <button id="btn-mark-won" class="btn">Mark Won</button>
         <button id="btn-pass" class="btn btn-ghost">Pass</button>
@@ -382,6 +368,7 @@ liveBidEl.innerHTML = `
       </div>
     </div>
   `;
+}
   const bidInput = $("#yourBid");
   const warn = $("#guardWarn");
   function validate(){
