@@ -57,15 +57,23 @@ function load(){
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw){
       state = { ...state, ...JSON.parse(raw) };
-    } else {
-      // seed sample
+    }
+    // ALWAYS ensure we have players; if not, seed the sample
+    if (!state.players || !Array.isArray(state.players) || state.players.length === 0){
       state.players = parseCSV(SAMPLE_CSV);
       state.queue = shuffle(state.players.map(p=>p.id));
+      state.activeId = null;
     }
+
     $("#totalPoints").value = state.totalPoints;
     $("#playersNeeded").value = state.playersNeeded;
     $("#minBasePerPlayer").value = state.minBasePerPlayer;
-  } catch { /* ignore */ }
+  } catch {
+    // If anything goes wrong, seed sample
+    state.players = parseCSV(SAMPLE_CSV);
+    state.queue = shuffle(state.players.map(p=>p.id));
+    state.activeId = null;
+  }
 }
 
 async function warmloadSupabase(){
