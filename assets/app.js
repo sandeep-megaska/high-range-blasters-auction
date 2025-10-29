@@ -19,6 +19,66 @@ import {
   loadConstraintsFromSupabase,
   loadSettingsFromSupabase
 } from "./supabaseClient.js";
+// --- Preselected parsing & application helpers ---
+function parsePreselectedInput(rawNameField, singleBidField) {
+  const s = (rawNameField || "").trim();
+  if (!s) return [];
+
+  // If user entered "Name1=1200; Name2=900" (or comma separated), parse pairs.
+  const looksLikeList = /[=;]/.test(s) || (s.includes(",") && s.includes("="));
+  if (looksLikeList) {
+    return s
+      .split(/[;,]/g)
+      .map(x => x.trim())
+      .filter(Boolean)
+      .map(pair => {
+        const [n, b] = pair.split("=").map(z => (z ?? "").trim());
+        return { name: n, bid: Number(b) || 0 };
+      })
+      .filter(x => x.name);
+  }
+  // Single name → use the single bid box
+  const singleBid = Number(singleBidField) || 0;
+  return [{ name: s, bid: singleBid }];
+}
+
+function applyPreselected(preList, players) {
+  // returns { playersUpdated, applied:[], missing:[] }
+  const applied = [];
+  const missing = [];
+  const next = players.map(p => ({ ...p })); // shallow clone
+
+  preList.forEach(entry => {
+    const target = next.find(
+      x => (x.name || "").trim().toLowerCase() === entry.name.trim().toLowerCase()
+    );
+    if (target) {
+      if (target.status !== "won") {
+        target.status = "won";
+        target.finalBid = Math.max(0, Number(entry.bid) || 0);
+        applied.push({ name: target.name, bid: target.finalBid });
+      } else {
+        // already won—leave as is
+        applied.push({ name: target.name, bid: target.finalBid || 0 });
+      }
+    } else {
+      missing.push(entry.name);
+    }
+  });
+
+  return { playersUpdated: next, applied, missing };
+}
+
+function reapplyPreselectedIfAny() {
+  const preList = parsePreselectedInput(
+    state.setup.preselectedName,
+    state.setup.preselectedBid
+  );
+  if (!preList.length) return;
+
+  const { playersUpdated } = applyPreselected(preList, state.players);
+  state.players = playersUpdated;
+}
 
 // ---------- Auth (hardcoded) ----------
 const AUTH_USER = "HRB";
