@@ -237,7 +237,15 @@ function renderPlayersList(){
         <div><b>${p.name}</b></div>
         <div class="${tier.class}"><span>${tier.label}</span><span>•</span><span>${p.valueScore.toFixed(1)}</span></div>
       </div>
-      <div class="meta">${p.role} • Grade ${p.grade} • Rating ${p.rating} • Base ${p.base}${p.is_wk ? " • WK" : ""}${p.batting_hand ? " • " + p.batting_hand + "-hand" : ""}</div>
+     <div class="meta">
+  ${p.role} • Grade ${p.grade} • Rating ${p.rating} • Base ${p.base}
+  ${p.is_wk ? " • WK" : ""}
+  ${p.batting_hand ? " • " + p.batting_hand + "-hand" : ""}
+  ${p.category ? " • " + p.category : ""}
+  ${p.alumni ? " • " + p.alumni : ""}
+  ${p.age ? " • Age " + p.age : ""}
+</div>
+
       <div class="row" style="margin-top:6px;">
         <button class="btn btn-ghost" data-action="set-active">Set Active</button>
         ${p.status === "pending" ? `<button class="btn btn-ghost" data-action="mark-lost">Mark Lost</button>` : `<button class="btn btn-ghost" data-action="reopen">Reopen</button>`}
@@ -277,7 +285,53 @@ function renderLiveBid(){
       <div class="title">
         <div>
           <div style="font-size:18px;font-weight:600">${p.name}</div>
-          <div class="meta">${p.role} • Grade ${p.grade} • Rating ${p.rating}${p.is_wk ? " • WK" : ""}${p.batting_hand ? " • " + p.batting_hand + "-hand" : ""}</div>
+          const basicMeta = [
+  p.role,
+  `Grade ${p.grade}`,
+  `Rating ${p.rating}`,
+  p.is_wk ? "WK" : null,
+  p.batting_hand ? `${p.batting_hand}-hand` : null
+].filter(Boolean).join(" • ");
+
+const extraMeta = [
+  p.category ? `Category: ${p.category}` : null,
+  p.alumni ? `Alumni: ${p.alumni}` : null,
+  p.dob ? `DOB: ${p.dob}` : null,
+  Number.isFinite(p.age) ? `Age: ${p.age}` : null
+].filter(Boolean).join(" • ");
+
+liveBidEl.innerHTML = `
+  <div class="item">
+    <div class="title">
+      <div>
+        <div style="font-size:18px;font-weight:600">${p.name}</div>
+        <div class="meta">${basicMeta}</div>
+        ${extraMeta ? `<div class="meta" style="margin-top:2px">${extraMeta}</div>` : ``}
+      </div>
+      <div class="${tier.class}"><span>${tier.label}</span><span>•</span><span>${score.toFixed(1)}</span></div>
+    </div>
+    <div class="info-grid" style="margin-top:8px;">
+      <div class="info"><div class="k">Base</div><div class="v">${p.base}</div></div>
+      <div class="info"><div class="k">Value Score</div><div class="v">${score.toFixed(1)}</div></div>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <label style="flex:1">Your Bid
+        <input type="number" id="yourBid" value="${p.base}" />
+        <div id="guardWarn" class="hint"></div>
+      </label>
+      <div class="col">
+        <button id="btn-bid-base" class="btn">Bid Base</button>
+        <button id="btn-plus10" class="btn btn-ghost">+10</button>
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <button id="btn-mark-won" class="btn">Mark Won</button>
+      <button id="btn-pass" class="btn btn-ghost">Pass</button>
+      <button id="btn-skip" class="btn btn-ghost">Skip / Next</button>
+    </div>
+  </div>
+`;
+
         </div>
         <div class="${tier.class}"><span>${tier.label}</span><span>•</span><span>${score.toFixed(1)}</span></div>
       </div>
