@@ -1,16 +1,36 @@
-import { STORAGE_KEY, SAMPLE_CSV, parseCSV, shuffle, csvExport, toNum } from "./utils.js";
-import { DEFAULT_CONSTRAINTS, evaluateRosterCompliance, computeValueScore, tierFromScore } from "./constraints.js";
-import { loadConstraintsFromSupabase, loadSettingsFromSupabase } from "./supabaseClient.js";
+// assets/app.js
+// High Range Blasters — Auction Assist (no-build, vanilla JS)
+
+import {
+  STORAGE_KEY,
+  SAMPLE_CSV,
+  parseCSV,
+  shuffle,
+  csvExport,
+  toNum
+} from "./utils.js";
+
+import {
+  DEFAULT_CONSTRAINTS,
+  evaluateRosterCompliance,
+  computeValueScore,
+  tierFromScore
+} from "./constraints.js";
+
+import {
+  loadConstraintsFromSupabase,
+  loadSettingsFromSupabase
+} from "./supabaseClient.js";
 
 // ---------- Global state ----------
 let state = {
-  players: [],            // {id, name, role, grade, rating, base, batting_hand, is_wk, status, finalBid}
-  queue: [],              // array of player ids
+  players: [],            // {id,name,role,grade,rating,base,batting_hand,is_wk,status,finalBid,dob,alumni,age,category}
+  queue: [],              // ids of pending players
   totalPoints: 1000,
   playersNeeded: 6,
   minBasePerPlayer: 50,
   activeId: null,
-  log: [],               // undo stack: [{type:"won"/"lost", id, bid?}]
+  log: [],               // [{type:"won"/"lost", id, bid?}]
   constraints: DEFAULT_CONSTRAINTS
 };
 
@@ -26,43 +46,49 @@ const csvUrlEl = $("#csvUrl");
 const csvPasteEl = $("#csvPaste");
 const complianceBarEl = $("#complianceBar");
 
-// Controls
-$("#totalPoints").addEventListener("change", e => { state.totalPoints = toNum(e.target.value, 0); persist(); render(); });
-$("#playersNeeded").addEventListener("change", e => { state.playersNeeded = toNum(e.target.value, 0); persist(); render(); });
-$("#minBasePerPlayer").addEventListener("change", e => { state.minBasePerPlayer = toNum(e.target.value, 0); persist(); render(); });
+// Controls listeners
+$("#totalPoints")?.addEventListener("change", e => {
+  state.totalPoints = toNum(e.target.value, 0);
+  persist(); render();
+});
+$("#playersNeeded")?.addEventListener("change", e => {
+  state.playersNeeded = toNum(e.target.value, 0);
+  persist(); render();
+});
+$("#minBasePerPlayer")?.addEventListener("change", e => {
+  state.minBasePerPlayer = toNum(e.target.value, 0);
+  persist(); render();
+});
 
-$("#btn-shuffle").addEventListener("click", () => { randomizeQueue(); });
-$("#btn-next").addEventListener("click", () => { nextPlayer(); });
-$("#btn-undo").addEventListener("click", () => { undo(); });
+$("#btn-shuffle")?.addEventListener("click", () => randomizeQueue());
+$("#btn-next")?.addEventListener("click", () => nextPlayer());
+$("#btn-undo")?.addEventListener("click", () => undo());
 
-$("#btn-fetch").addEventListener("click", () => { importFromCsvUrl(); });
-$("#btn-clear-url").addEventListener("click", () => { csvUrlEl.value = ""; });
+$("#btn-fetch")?.addEventListener("click", () => importFromCsvUrl());
+$("#btn-clear-url")?.addEventListener("click", () => { csvUrlEl.value = ""; });
 
-$("#btn-import").addEventListener("click", () => { importFromPaste(); });
-$("#btn-clear-paste").addEventListener("click", () => { csvPasteEl.value = ""; });
+$("#btn-import")?.addEventListener("click", () => importFromPaste());
+$("#btn-clear-paste")?.addEventListener("click", () => { csvPasteEl.value = ""; });
 
-$("#btn-export").addEventListener("click", () => { exportWon(); });
-$("#btn-reset").addEventListener("click", () => {
+$("#btn-export")?.addEventListener("click", () => exportWon());
+$("#btn-reset")?.addEventListener("click", () => {
   localStorage.removeItem(STORAGE_KEY);
   location.reload();
 });
 
 // ---------- Init ----------
-if (!state.players || state.players.length === 0) {
-  liveBidEl.innerHTML = '<div class="hint">No players loaded — click <b>Fetch CSV</b> or <b>Reset Session</b>.</div>';
-}
+load();          // load from localStorage or seed from SAMPLE_CSV
+render();        // initial render
+warmloadSupabase(); // optional: pull settings/constraints from Supabase (if configured)
 
-load();
-render();
-warmloadSupabase(); // optional async load of constraints/settings
-
+// ---------- Load / Save ----------
 function load(){
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       state = { ...state, ...JSON.parse(raw) };
     }
-    // If no players saved, seed from SAMPLE_CSV
+    // Ensure we always have players
     if (!state.players || !Array.isArray(state.players) || state.players.length === 0){
       state.players = parseCSV(SAMPLE_CSV);
       state.queue = shuffle(state.players.map(p=>p.id));
@@ -74,30 +100,31 @@ function load(){
     state.activeId = null;
   }
 
-  $("#totalPoints").value = state.totalPoints;
-  $("#playersNeeded").value = state.playersNeeded;
-  $("#minBasePerPlayer").value = state.minBasePerPlayer;
+  // Reflect state into inputs
+  const tp = $("#totalPoints"), pn = $("#playersNeeded"), mb = $("#minBasePerPlayer");
+  if (tp) tp.value = state.totalPoints;
+  if (pn) pn.value = state.playersNeeded;
+  if (mb) mb.value = state.minBasePerPlayer;
 }
 
-
 async function warmloadSupabase(){
-  // Optional: pull constraints/settings from Supabase; fall back to local if null
   const team = "high-range-blasters";
-  const s = await loadSettingsFromSupabase(team);
-  if (s) {
-    state.totalPoints = s.total_points ?? state.totalPoints;
-    state.playersNeeded = s.players_needed ?? state.playersNeeded;
-    state.minBasePerPlayer = s.min_base_per_player ?? state.minBasePerPlayer;
-    $("#totalPoints").value = state.totalPoints;
-    $("#playersNeeded").value = state.playersNeeded;
-    $("#minBasePerPlayer").value = state.minBasePerPlayer;
+  try {
+    const s = await loadSettingsFromSupabase(team);
+    if (s) {
+      state.totalPoints = s.total_points ?? state.totalPoints;
+      state.playersNeeded = s.players_needed ?? state.playersNeeded;
+      state.minBasePerPlayer = s.min_base_per_player ?? state.minBasePerPlayer;
+      $("#totalPoints").value = state.totalPoints;
+      $("#playersNeeded").value = state.playersNeeded;
+      $("#minBasePerPlayer").value = state.minBasePerPlayer;
+    }
+    const c = await loadConstraintsFromSupabase(team);
+    if (c && c.length) state.constraints = c;
+    persist(); render();
+  } catch {
+    // ignore optional Supabase errors for MVP
   }
-  const c = await loadConstraintsFromSupabase(team);
-  if (c && c.length) {
-    state.constraints = c;
-  }
-  persist();
-  render();
 }
 
 function persist(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -115,13 +142,13 @@ function remainingPoints(){
 }
 function guardrailOK(afterSpend = 0){
   const remAfter = remainingPoints() - afterSpend;
-  const slotsAfter = Math.max(0, remainingSlots() - (afterSpend>0 ? 1 : 0));
+  const slotsAfter = Math.max(0, remainingSlots() - (afterSpend > 0 ? 1 : 0));
   return remAfter >= (slotsAfter * state.minBasePerPlayer);
 }
 
 // ---------- Queue / actions ----------
 function randomizeQueue(){
-  const ids = state.players.filter(p=>p.status==="pending").map(p=>p.id);
+  const ids = state.players.filter(p => p.status === "pending").map(p => p.id);
   state.queue = shuffle(ids);
   state.activeId = null;
   persist(); render();
@@ -156,9 +183,14 @@ function undo(){
   persist(); render();
 }
 
+function updatePlayer(id, patch){
+  state.players = state.players.map(p => p.id===id ? { ...p, ...patch } : p);
+  persist(); render();
+}
+
 // ---------- Import / Export ----------
 async function importFromCsvUrl(){
-  const url = csvUrlEl.value.trim();
+  const url = (csvUrlEl?.value || "").trim();
   if (!url) { alert("CSV URL is empty."); return; }
   try {
     const res = await fetch(url);
@@ -174,7 +206,7 @@ async function importFromCsvUrl(){
   }
 }
 function importFromPaste(){
-  const txt = csvPasteEl.value.trim();
+  const txt = (csvPasteEl?.value || "").trim();
   if (!txt) { alert("Paste CSV is empty."); return; }
   try {
     const arr = parseCSV(txt);
@@ -191,7 +223,14 @@ function exportWon(){
   const won = state.players.filter(p => p.status === "won");
   if (!won.length) { alert("No players won yet."); return; }
   const rows = won.map(p => ({
-    name: p.name, role: p.role, grade: p.grade, rating: p.rating, finalBid: p.finalBid
+    name: p.name,
+    role: p.role,
+    grade: p.grade,
+    rating: p.rating,
+    finalBid: p.finalBid,
+    alumni: p.alumni || "",
+    age: p.age || "",
+    category: p.category || ""
   }));
   const csv = csvExport(rows);
   const blob = new Blob([csv], {type:"text/csv"});
@@ -204,21 +243,23 @@ function exportWon(){
 // ---------- Rendering ----------
 function render(){
   // header stats
-  remainingPointsEl.textContent = remainingPoints();
-  remainingSlotsEl.textContent = remainingSlots();
-  guardrailEl.classList.toggle("danger", !guardrailOK(0));
-  guardrailEl.innerHTML = `Guardrail: <b>${guardrailOK(0) ? "OK" : "At Risk"}</b>`;
+  if (remainingPointsEl) remainingPointsEl.textContent = remainingPoints();
+  if (remainingSlotsEl) remainingSlotsEl.textContent = remainingSlots();
+  if (guardrailEl) {
+    guardrailEl.classList.toggle("danger", !guardrailOK(0));
+    guardrailEl.innerHTML = `Guardrail: <b>${guardrailOK(0) ? "OK" : "At Risk"}</b>`;
+  }
 
-  // players list
-  playersCountEl.textContent = `(${state.players.length})`;
+  // players list + compliance + live bid + selected
+  if (playersCountEl) playersCountEl.textContent = `(${state.players.length})`;
   renderCompliance();
   renderPlayersList();
   renderLiveBid();
   renderSelectedList();
-
 }
 
 function renderCompliance(){
+  if (!complianceBarEl) return;
   const c = evaluateRosterCompliance(state.players, state.constraints);
   const ok = c.allMinOk;
   complianceBarEl.className = "compliance " + (ok ? "ok" : "warn");
@@ -237,41 +278,31 @@ function renderCompliance(){
 }
 
 function renderPlayersList(){
+  if (!playersListEl) return;
   playersListEl.innerHTML = "";
+
   const withScores = state.players.map(p => ({
     ...p,
     valueScore: computeValueScore(p, state.players, state.constraints)
   }));
+
   withScores.forEach(p => {
     const tier = tierFromScore(p.valueScore);
     const div = document.createElement("div");
     div.className = "item " + (p.status !== "pending" ? "disabled" : "");
-   div.innerHTML = `
-  <div class="title">
-    <div><b>${p.name}</b></div>
-    <div class="${tier.class}"><span>${tier.label}</span><span>•</span><span>${p.valueScore.toFixed(1)}</span></div>
-  </div>
-  <div class="meta">
-    ${p.role} • Grade ${p.grade} • Rating ${p.rating} • Base ${p.base}
-    ${p.is_wk ? " • WK" : ""}
-    ${p.batting_hand ? " • " + p.batting_hand + "-hand" : ""}
-    ${p.category ? " • " + p.category : ""}
-    ${p.alumni ? " • " + p.alumni : ""}
-    ${p.age ? " • Age " + p.age : ""}
-  </div>
-  <div class="row" style="margin-top:6px;">
-    <button class="btn btn-ghost" data-action="set-active">Set Active</button>
-    ${p.status === "pending" ? `<button class="btn btn-ghost" data-action="mark-lost">Mark Lost</button>` : `<button class="btn btn-ghost" data-action="reopen">Reopen</button>`}
-    ${p.status === "won" ? `<span style="margin-left:auto;font-size:12px;color:#475569">Final: <b>${p.finalBid}</b></span>` : ""}
-  </div>
-  <div class="info-grid" style="margin-top:6px;">
-    <label class="info"><div class="k">Base</div><input data-edit="base" value="${p.base}" /></label>
-    <label class="info"><div class="k">Rating</div><input data-edit="rating" value="${p.rating}" /></label>
-    <label class="info"><div class="k">Grade</div><input data-edit="grade" value="${p.grade}" /></label>
-  </div>
-`;
-
-
+    div.innerHTML = `
+      <div class="title">
+        <div><b>${p.name}</b></div>
+        <div class="${tier.class}"><span>${tier.label}</span><span>•</span><span>${p.valueScore.toFixed(1)}</span></div>
+      </div>
+      <div class="meta">
+        ${p.role} • Grade ${p.grade} • Rating ${p.rating} • Base ${p.base}
+        ${p.is_wk ? " • WK" : ""}
+        ${p.batting_hand ? " • " + p.batting_hand + "-hand" : ""}
+        ${p.category ? " • " + p.category : ""}
+        ${p.alumni ? " • " + p.alumni : ""}
+        ${p.age ? " • Age " + p.age : ""}
+      </div>
       <div class="row" style="margin-top:6px;">
         <button class="btn btn-ghost" data-action="set-active">Set Active</button>
         ${p.status === "pending" ? `<button class="btn btn-ghost" data-action="mark-lost">Mark Lost</button>` : `<button class="btn btn-ghost" data-action="reopen">Reopen</button>`}
@@ -283,33 +314,41 @@ function renderPlayersList(){
         <label class="info"><div class="k">Grade</div><input data-edit="grade" value="${p.grade}" /></label>
       </div>
     `;
-    // wire actions
-    div.querySelector("[data-action='set-active']").addEventListener("click", () => { state.activeId = p.id; persist(); render(); });
-    const lostBtn = div.querySelector("[data-action='mark-lost']");
-    if (lostBtn) lostBtn.addEventListener("click", () => { markLost(p.id); });
-    const reopenBtn = div.querySelector("[data-action='reopen']");
-    if (reopenBtn) reopenBtn.addEventListener("click", () => { updatePlayer(p.id, { status:"pending", finalBid: undefined }); });
 
-    div.querySelector("[data-edit='base']").addEventListener("change", e => updatePlayer(p.id, { base: toNum(e.target.value, p.base) }));
-    div.querySelector("[data-edit='rating']").addEventListener("change", e => updatePlayer(p.id, { rating: toNum(e.target.value, p.rating) }));
-    div.querySelector("[data-edit='grade']").addEventListener("change", e => updatePlayer(p.id, { grade: String(e.target.value || p.grade).toUpperCase() }));
+    // wire actions
+    div.querySelector("[data-action='set-active']")?.addEventListener("click", () => {
+      state.activeId = p.id; persist(); render();
+    });
+    div.querySelector("[data-action='mark-lost']")?.addEventListener("click", () => markLost(p.id));
+    div.querySelector("[data-action='reopen']")?.addEventListener("click", () =>
+      updatePlayer(p.id, { status:"pending", finalBid: undefined })
+    );
+
+    div.querySelector("[data-edit='base']")?.addEventListener("change", e =>
+      updatePlayer(p.id, { base: toNum(e.target.value, p.base) })
+    );
+    div.querySelector("[data-edit='rating']")?.addEventListener("change", e =>
+      updatePlayer(p.id, { rating: toNum(e.target.value, p.rating) })
+    );
+    div.querySelector("[data-edit='grade']")?.addEventListener("change", e =>
+      updatePlayer(p.id, { grade: String(e.target.value || p.grade).toUpperCase() })
+    );
 
     playersListEl.appendChild(div);
   });
 }
 
 function renderLiveBid() {
-  const liveBidEl = document.getElementById("liveBid");
   if (!liveBidEl) return;
 
-  const active = state.players.find(p => p.id === state.activeId);
-  if (!active) {
+  const p = state.players.find(x => x.id === state.activeId);
+  if (!p) {
     liveBidEl.innerHTML = `<div class="hint">No active player. Click <b>Next Player</b> to start.</div>`;
     return;
   }
 
-  const p = active;
-  const { valueScore: score, tier } = computePlayerTier(p);
+  const score = computeValueScore(p, state.players, state.constraints);
+  const tier = tierFromScore(score);
 
   const basicMeta = [
     p.role,
@@ -340,14 +379,8 @@ function renderLiveBid() {
       </div>
 
       <div class="info-grid" style="margin-top:8px;">
-        <div class="info">
-          <div class="k">Base</div>
-          <div class="v">${p.base}</div>
-        </div>
-        <div class="info">
-          <div class="k">Value Score</div>
-          <div class="v">${score.toFixed(1)}</div>
-        </div>
+        <div class="info"><div class="k">Base</div><div class="v">${p.base}</div></div>
+        <div class="info"><div class="k">Value Score</div><div class="v">${score.toFixed(1)}</div></div>
       </div>
 
       <div class="row" style="margin-top:8px;">
@@ -368,35 +401,39 @@ function renderLiveBid() {
       </div>
     </div>
   `;
-}
-  const bidInput = $("#yourBid");
-  const warn = $("#guardWarn");
+
+  // wire bid interactions
+  const bidInput = document.getElementById("yourBid");
+  const warn = document.getElementById("guardWarn");
   function validate(){
     const bid = toNum(bidInput.value, p.base);
     const ok = guardrailOK(bid);
-    warn.textContent = ok ? "" : `Bid violates guardrail: keep ≥ ${(Math.max(0, (remainingSlots()-1)*state.minBasePerPlayer))} after this pick.`;
+    warn.textContent = ok ? "" : `Bid violates guardrail: keep ≥ ${Math.max(0, (remainingSlots()-1)*state.minBasePerPlayer)} after this pick.`;
     return ok;
   }
   validate();
 
-  $("#btn-bid-base").addEventListener("click", () => { bidInput.value = p.base; validate(); });
-  $("#btn-plus10").addEventListener("click", () => { bidInput.value = String(Math.max(p.base, toNum(bidInput.value, p.base) + 10)); validate(); });
-  $("#btn-mark-won").addEventListener("click", () => {
+  document.getElementById("btn-bid-base")?.addEventListener("click", () => {
+    bidInput.value = p.base;
+    validate();
+  });
+  document.getElementById("btn-plus10")?.addEventListener("click", () => {
+    bidInput.value = String(Math.max(p.base, toNum(bidInput.value, p.base) + 10));
+    validate();
+  });
+  document.getElementById("btn-mark-won")?.addEventListener("click", () => {
     const bid = toNum(bidInput.value, p.base);
     if (!guardrailOK(bid)) { alert("Guardrail violated. Reduce bid."); return; }
     markWon(p.id, bid);
   });
-  $("#btn-pass").addEventListener("click", () => markLost(p.id));
-  $("#btn-skip").addEventListener("click", () => nextPlayer());
+  document.getElementById("btn-pass")?.addEventListener("click", () => markLost(p.id));
+  document.getElementById("btn-skip")?.addEventListener("click", () => nextPlayer());
 }
 
-function updatePlayer(id, patch){
-  state.players = state.players.map(p => p.id===id ? { ...p, ...patch } : p);
-  persist(); render();
-}
 function renderSelectedList(){
   const container = document.getElementById("selectedList");
   if (!container) return;
+
   const won = state.players
     .filter(p => p.status === "won")
     .sort((a,b) => (b.finalBid||0) - (a.finalBid||0));
@@ -424,4 +461,3 @@ function renderSelectedList(){
     `;
   }).join("");
 }
-
