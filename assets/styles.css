@@ -57,4 +57,18 @@ textarea { resize: vertical; }
   .brand-logo { height:36px; }
 }
 .topbar h1 { font-size: 18px; margin:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.hidden { display: none !important; }
+
+/* simple overlay + modal */
+.overlay {
+  position: fixed; inset: 0; background: rgba(2,6,23,.6);
+  display: grid; place-items: center; z-index: 50;
+}
+.modal {
+  width: min(720px, 92vw);
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 16px;
+  padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.25);
+}
+.modal h2 { margin: 0 0 6px; font-size: 18px; }
+.modal .error { margin-top: 8px; color: #dc2626; font-size: 12px; }
 
