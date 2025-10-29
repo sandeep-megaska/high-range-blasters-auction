@@ -101,6 +101,61 @@
     import "./assets/constraints.js";
     import "./assets/supabaseClient.js";
     import "./assets/app.js";
+    <!-- LOGIN OVERLAY -->
+<div id="authGate" class="overlay hidden">
+  <div class="modal">
+    <h2>Sign in</h2>
+    <p class="hint">Enter the auction console</p>
+    <label> Username
+      <input id="loginUser" placeholder="HRB" />
+    </label>
+    <label> Password
+      <input id="loginPass" type="password" placeholder="••••••••" />
+    </label>
+    <div class="row">
+      <button id="btnLogin" class="btn">Login</button>
+    </div>
+    <div id="loginError" class="error"></div>
+  </div>
+</div>
+
+<!-- PRE-BID SETTINGS OVERLAY -->
+<div id="setupPanel" class="overlay hidden">
+  <div class="modal">
+    <h2>Bid Settings</h2>
+    <p class="hint">Configure roster & points before starting</p>
+
+    <div class="form-grid">
+      <label> Total Points (overall)
+        <input type="number" id="setupTotalPoints" value="15000" />
+      </label>
+      <label> Players to Bid (max 15)
+        <input type="number" id="setupPlayersNeeded" value="15" />
+      </label>
+      <label> Preselected Player (name)
+        <input id="setupPreName" placeholder="Type exact player name (optional)" />
+      </label>
+      <label> Preselected Player Cost
+        <input type="number" id="setupPreCost" value="0" />
+      </label>
+      <label class="row" style="align-items:center; gap:8px;">
+        <input type="checkbox" id="setupPreCounts" checked />
+        <span>Count preselected player towards roster</span>
+      </label>
+    </div>
+
+    <div class="stats" style="margin-top:10px;">
+      <div class="stat"><span>Available Points (after preselected)</span><b id="setupAvail">15000</b></div>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <button id="btnSetupStart" class="btn">Start Auction</button>
+      <button id="btnSetupSkip" class="btn btn-ghost">Skip (use defaults)</button>
+    </div>
+    <div id="setupNote" class="hint"></div>
+  </div>
+</div>
+
   </script>
 </body>
 </html>
