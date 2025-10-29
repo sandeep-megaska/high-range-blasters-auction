@@ -48,6 +48,10 @@ $("#btn-reset").addEventListener("click", () => {
 });
 
 // ---------- Init ----------
+if (!state.players || state.players.length === 0) {
+  liveBidEl.innerHTML = '<div class="hint">No players loaded — click <b>Fetch CSV</b> or <b>Reset Session</b>.</div>';
+}
+
 load();
 render();
 warmloadSupabase(); // optional async load of constraints/settings
