@@ -246,19 +246,31 @@ function renderPlayersList(){
     const tier = tierFromScore(p.valueScore);
     const div = document.createElement("div");
     div.className = "item " + (p.status !== "pending" ? "disabled" : "");
-    div.innerHTML = `
-      <div class="title">
-        <div><b>${p.name}</b></div>
-        <div class="${tier.class}"><span>${tier.label}</span><span>•</span><span>${p.valueScore.toFixed(1)}</span></div>
-      </div>
-     <div class="meta">
-  ${p.role} • Grade ${p.grade} • Rating ${p.rating} • Base ${p.base}
-  ${p.is_wk ? " • WK" : ""}
-  ${p.batting_hand ? " • " + p.batting_hand + "-hand" : ""}
-  ${p.category ? " • " + p.category : ""}
-  ${p.alumni ? " • " + p.alumni : ""}
-  ${p.age ? " • Age " + p.age : ""}
-</div>
+   div.innerHTML = `
+  <div class="title">
+    <div><b>${p.name}</b></div>
+    <div class="${tier.class}"><span>${tier.label}</span><span>•</span><span>${p.valueScore.toFixed(1)}</span></div>
+  </div>
+  <div class="meta">
+    ${p.role} • Grade ${p.grade} • Rating ${p.rating} • Base ${p.base}
+    ${p.is_wk ? " • WK" : ""}
+    ${p.batting_hand ? " • " + p.batting_hand + "-hand" : ""}
+    ${p.category ? " • " + p.category : ""}
+    ${p.alumni ? " • " + p.alumni : ""}
+    ${p.age ? " • Age " + p.age : ""}
+  </div>
+  <div class="row" style="margin-top:6px;">
+    <button class="btn btn-ghost" data-action="set-active">Set Active</button>
+    ${p.status === "pending" ? `<button class="btn btn-ghost" data-action="mark-lost">Mark Lost</button>` : `<button class="btn btn-ghost" data-action="reopen">Reopen</button>`}
+    ${p.status === "won" ? `<span style="margin-left:auto;font-size:12px;color:#475569">Final: <b>${p.finalBid}</b></span>` : ""}
+  </div>
+  <div class="info-grid" style="margin-top:6px;">
+    <label class="info"><div class="k">Base</div><input data-edit="base" value="${p.base}" /></label>
+    <label class="info"><div class="k">Rating</div><input data-edit="rating" value="${p.rating}" /></label>
+    <label class="info"><div class="k">Grade</div><input data-edit="grade" value="${p.grade}" /></label>
+  </div>
+`;
+
 
       <div class="row" style="margin-top:6px;">
         <button class="btn btn-ghost" data-action="set-active">Set Active</button>
