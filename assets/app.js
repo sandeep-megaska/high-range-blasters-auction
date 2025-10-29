@@ -239,9 +239,11 @@ function onLogout(){
 // ---------- Settings handlers ----------
 function updateAvailableScorePreview(){
   const total = toNum(cfgTotalPoints?.value, 15000);
-  const preBid = toNum(cfgPreBid?.value, 0);
-  if (cfgAvailableScore) cfgAvailableScore.textContent = Math.max(0, total - preBid);
+  const preList = parsePreselectedInput(cfgPreName?.value, cfgPreBid?.value);
+  const preTotal = preList.reduce((t, x) => t + Math.max(0, Number(x.bid) || 0), 0);
+  if (cfgAvailableScore) cfgAvailableScore.textContent = Math.max(0, total - preTotal);
 }
+
 
 function onSaveSettings(){
   settingsError.textContent = "";
@@ -398,7 +400,10 @@ async function importFromCsvUrl(){
     const arr = parseCSV(txt);
     if (!arr.length) { alert("No rows found in CSV."); return; }
     state.players = arr;
-    state.queue = shuffle(arr.map(p=>p.id));
+    // Re-apply any preselected to the newly imported list
+    reapplyPreselectedIfAny();
+
+    state.queue = shuffle(state.players.filter(p=>p.status==="pending").map(p=>p.id));
     state.activeId = null;
     persist(); render();
   } catch (e){
@@ -412,7 +417,10 @@ function importFromPaste(){
     const arr = parseCSV(txt);
     if (!arr.length) { alert("No rows found in CSV."); return; }
     state.players = arr;
-    state.queue = shuffle(arr.map(p=>p.id));
+    // Re-apply any preselected to the newly pasted list
+    reapplyPreselectedIfAny();
+
+    state.queue = shuffle(state.players.filter(p=>p.status==="pending").map(p=>p.id));
     state.activeId = null;
     persist(); render();
   } catch (e){
