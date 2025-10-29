@@ -4,15 +4,15 @@ export const STORAGE_KEY = "hrb-auction-state-v1";
 
 export const SAMPLE_CSV =
 `name,dob,alumni,age,category,role,grade,rating,base,batting_hand,is_wk
-A. Sharma,1993-04-21,MACE, ,Batsman,Batsman,A,92,120,L,false
-V. Menon,1991-10-05,TKM, ,All-Rounder,All-Rounder,A,88,130,R,false
-S. Thomas,1997-02-12,CET, ,Bowler,Bowler,B,75,90,R,false
-R. Iqbal,1995-08-30,NIT, ,WK,Wicket Keeper,B,78,95,R,true
-K. Varma,1999-05-09,MACE, ,Batsman,Batsman,C,62,60,L,false
-P. Nair,1996-01-17,TKM, ,Bowler,Bowler,B,73,85,R,false
-N. Khan,1992-12-01,CET, ,All-Rounder,All-Rounder,A,90,135,L,false
-F. Joseph,1998-06-03,NIT, ,Batsman,Batsman,B,70,80,R,false
-A. Rahman,1994-09-23,MACE, ,Bowler,Bowler,C,58,55,R,false`;
+A. Sharma,1993-04-21,MACE,,Batsman,Batsman,A,92,120,L,false
+V. Menon,1991-10-05,TKM,,All-Rounder,All-Rounder,A,88,130,R,false
+S. Thomas,1997-02-12,CET,,Bowler,Bowler,B,75,90,R,false
+R. Iqbal,1995-08-30,NIT,,WK,Wicket Keeper,B,78,95,R,true
+K. Varma,1999-05-09,MACE,,Batsman,Batsman,C,62,60,L,false
+P. Nair,1996-01-17,TKM,,Bowler,Bowler,B,73,85,R,false
+N. Khan,1992-12-01,CET,,All-Rounder,All-Rounder,A,90,135,L,false
+F. Joseph,1998-06-03,NIT,,Batsman,Batsman,B,70,80,R,false
+A. Rahman,1994-09-23,MACE,,Bowler,Bowler,C,58,55,R,false`;
 
 
 export function splitCSVLine(line){
