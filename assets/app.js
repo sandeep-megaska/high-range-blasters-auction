@@ -202,6 +202,8 @@ function render(){
   renderCompliance();
   renderPlayersList();
   renderLiveBid();
+  renderSelectedList();
+
 }
 
 function renderCompliance(){
@@ -380,5 +382,35 @@ liveBidEl.innerHTML = `
 function updatePlayer(id, patch){
   state.players = state.players.map(p => p.id===id ? { ...p, ...patch } : p);
   persist(); render();
+}
+function renderSelectedList(){
+  const container = document.getElementById("selectedList");
+  if (!container) return;
+  const won = state.players
+    .filter(p => p.status === "won")
+    .sort((a,b) => (b.finalBid||0) - (a.finalBid||0));
+
+  if (!won.length) {
+    container.innerHTML = `<div class="hint">No players selected yet.</div>`;
+    return;
+  }
+
+  container.innerHTML = won.map(p => {
+    const line1 = `${p.name} — ${p.role}${p.is_wk ? " (WK)" : ""}${p.batting_hand ? ", " + p.batting_hand + "-hand" : ""}`;
+    const line2 = [
+      p.category ? `Category: ${p.category}` : null,
+      p.alumni ? `Alumni: ${p.alumni}` : null,
+      p.age ? `Age: ${p.age}` : null,
+      p.grade ? `Grade: ${p.grade}` : null,
+      `Bid: ${p.finalBid}`
+    ].filter(Boolean).join(" • ");
+
+    return `
+      <div class="item">
+        <div class="title"><div><b>${line1}</b></div></div>
+        <div class="meta">${line2}</div>
+      </div>
+    `;
+  }).join("");
 }
 
