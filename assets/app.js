@@ -248,45 +248,42 @@ function onSaveSettings(){
 
   const playersCap = toNum(cfgPlayersCap?.value, 15);
   const overallPoints = toNum(cfgTotalPoints?.value, 15000);
-  const preName = (cfgPreName?.value || "").trim();
-  const preBid = toNum(cfgPreBid?.value, 0);
+  const preNameRaw = (cfgPreName?.value || "").trim();
+  const preBidRaw = toNum(cfgPreBid?.value, 0);
 
   if (playersCap <= 0 || overallPoints <= 0) {
     settingsError.textContent = "Enter positive values for players and points.";
     return;
   }
-  if (preBid < 0) {
+  if (preBidRaw < 0) {
     settingsError.textContent = "Preselected bid cannot be negative.";
     return;
   }
 
-  // Apply to app state
+  // Store setup
   state.setup.playersCap = playersCap;
   state.setup.overallPoints = overallPoints;
-  state.setup.preselectedName = preName;
-  state.setup.preselectedBid = preBid;
+  state.setup.preselectedName = preNameRaw;
+  state.setup.preselectedBid = preBidRaw;
   state.setup.done = true;
 
-  // Map settings → working controls
+  // Map to working controls
   state.totalPoints = overallPoints;
   state.playersNeeded = playersCap;
 
-  // If preselected provided, try to mark as WON at given bid
-  if (preName && preBid > 0) {
-    const target = state.players.find(p => (p.name || "").trim().toLowerCase() === preName.toLowerCase());
-    if (target && target.status === "pending") {
-      // Use internal markWon (this logs and recomputes guardrails automatically)
-      state.players = state.players.map(p => p.id===target.id ? { ...p, status:"won", finalBid: preBid } : p);
-      state.log.push({ type:"won", id: target.id, bid: preBid });
-    } else {
-      // If not found, we still proceed; user can correct name later
-      settingsError.textContent = "Note: preselected player name not found; no player was marked won.";
+  // Apply preselected now (on current list; will reapply after CSV import too)
+  const preList = parsePreselectedInput(preNameRaw, preBidRaw);
+  if (preList.length) {
+    const { playersUpdated, missing } = applyPreselected(preList, state.players);
+    state.players = playersUpdated;
+    if (missing.length) {
+      settingsError.textContent = `Note: not found in current list → ${missing.join(", ")}. They will be rechecked after you import the master sheet.`;
     }
   }
 
   persist();
-  routeViews();   // go to app
-  render();       // first render with applied settings
+  routeViews();
+  render();
 }
 
 // ---------- Load / Save ----------
