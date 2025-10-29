@@ -59,26 +59,26 @@ warmloadSupabase(); // optional async load of constraints/settings
 function load(){
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw){
+    if (raw) {
       state = { ...state, ...JSON.parse(raw) };
     }
-    // ALWAYS ensure we have players; if not, seed the sample
+    // If no players saved, seed from SAMPLE_CSV
     if (!state.players || !Array.isArray(state.players) || state.players.length === 0){
       state.players = parseCSV(SAMPLE_CSV);
       state.queue = shuffle(state.players.map(p=>p.id));
       state.activeId = null;
     }
-
-    $("#totalPoints").value = state.totalPoints;
-    $("#playersNeeded").value = state.playersNeeded;
-    $("#minBasePerPlayer").value = state.minBasePerPlayer;
   } catch {
-    // If anything goes wrong, seed sample
     state.players = parseCSV(SAMPLE_CSV);
     state.queue = shuffle(state.players.map(p=>p.id));
     state.activeId = null;
   }
+
+  $("#totalPoints").value = state.totalPoints;
+  $("#playersNeeded").value = state.playersNeeded;
+  $("#minBasePerPlayer").value = state.minBasePerPlayer;
 }
+
 
 async function warmloadSupabase(){
   // Optional: pull constraints/settings from Supabase; fall back to local if null
