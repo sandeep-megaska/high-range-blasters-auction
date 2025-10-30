@@ -20,7 +20,7 @@ let state = {
   log: [],
   constraints: DEFAULT_CONSTRAINTS,
 
-  // categories (editable in settings if you have a UI)
+  // categories (editable in settings UI if you add it)
   catBase: { c1:1500, c2:1200, c3:900, c4:700, c5:500 },
 
   // setup/auth (no-op by default)
@@ -33,9 +33,7 @@ let state = {
 };
 
 function persist() {
-   try {
-    localStorage.setItem("hrb-auction-state", JSON.stringify(state));
-  } catch {}
+  try { localStorage.setItem("hrb-auction-state", JSON.stringify(state)); } catch {}
 }
 function load() {
   try {
@@ -72,7 +70,6 @@ function remainingSlots() {
 
 function guardrailOK(bid) {
   const slotsLeft = remainingSlots();
-  // very simple guard: keep at least minBasePerPlayer for each remaining slot (except the current)
   const my = clubStats(state.myClubSlug);
   const start = my.club ? (my.club.starting_budget ?? 15000) : (state.totalPoints || 15000);
   const spent = my.spend;
@@ -86,17 +83,6 @@ function guardrailOK(bid) {
 =========================== */
 function supabaseAvailable() {
   return !!(window.ENV?.SUPABASE_URL && window.ENV?.SUPABASE_ANON_KEY && window.supabase?.createClient);
-}
-function goToBid() {
-  const live = document.getElementById("liveBid");
-  if (live) live.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-function wireGoToBid() {
-  const btn = document.getElementById("btnGoToBid");
-  if (!btn) return;
-  btn.onclick = null;
-  btn.addEventListener("click", goToBid);
 }
 
 let sb = null;
@@ -264,6 +250,10 @@ function renderPlayersList() {
   root.querySelectorAll("[data-action='start']").forEach(btn => {
     btn.addEventListener("click", () => setActivePlayer(btn.getAttribute("data-id")));
   });
+
+  // count
+  const pc = $("playersCount");
+  if (pc) pc.textContent = state.players?.length ? `(${state.players.length})` : "";
 }
 
 function renderOtherClubsPanel() {
@@ -300,12 +290,11 @@ function renderOtherClubsPanel() {
 
 async function wirePassPanelForPlayer(p) {
   const passPanel = $("passPanel");
-  const passClubInput = $("passClubInput");
-  const passClubSelect = $("passClubSelect");
+  const passClubInput = $("passClubInput");   // <input list="clubNames">
   const passBidAmount = $("passBidAmount");
   const passPanelMsg = $("passPanelMsg");
-  const datalist = $("clubNames");
-  if (!passPanel || !passClubInput || !passClubSelect || !passBidAmount || !datalist) return;
+  const datalist = $("clubNames");            // <datalist id="clubNames">
+  if (!passPanel || !passClubInput || !passBidAmount || !datalist) return;
 
   // ensure clubs available
   try {
@@ -324,31 +313,28 @@ async function wirePassPanelForPlayer(p) {
 
   if (!others.length) {
     datalist.innerHTML = "";
-    passClubSelect.innerHTML = `<option value="">-- no clubs yet --</option>`;
     passPanelMsg.textContent = "No other clubs found. Create clubs first in the Add Club section.";
     return;
   }
 
+  // Fill the datalist for type-to-search
   datalist.innerHTML = others.map(c => `<option value="${c.name}"></option>`).join("");
-  passClubSelect.innerHTML = `<option value="">-- choose club --</option>` +
-    others.map(c => `<option value="${c.slug}">${c.name}</option>`).join("");
 
-  // Assign (attach once per render)
+  // Rebind Assign button (drop old listeners)
   const assignBtn = $("btn-assign-to-club");
-  assignBtn?.replaceWith(assignBtn.cloneNode(true)); // drop previous listeners
+  if (!assignBtn) return;
+  assignBtn.replaceWith(assignBtn.cloneNode(true));
   const freshAssign = $("btn-assign-to-club");
-  freshAssign?.addEventListener("click", async () => {
+  freshAssign.addEventListener("click", async () => {
     passPanelMsg.textContent = "";
 
+    const typed = (passClubInput.value || "").trim().toLowerCase();
     let club = null;
-    if (passClubSelect.value) {
-      club = others.find(c => c.slug === passClubSelect.value);
-    } else if (passClubInput.value.trim()) {
-      const name = passClubInput.value.trim().toLowerCase();
-      club = others.find(c => (c.name || "").toLowerCase() === name) ||
-             others.find(c => (c.name || "").toLowerCase().startsWith(name));
+    if (typed) {
+      club = others.find(c => (c.name || "").toLowerCase() === typed) ||
+             others.find(c => (c.name || "").toLowerCase().startsWith(typed));
     }
-    if (!club) { passPanelMsg.textContent = "Pick a valid club using dropdown or start typing the club name."; return; }
+    if (!club) { passPanelMsg.textContent = "Pick a valid club from the list (start typing)."; return; }
 
     const winningBid = Math.max(0, toNum(passBidAmount.value, p.base));
 
@@ -360,15 +346,10 @@ async function wirePassPanelForPlayer(p) {
     state.activeId = null;
     persist();
 
-    // db budget adjust
+    // db budget adjust + refresh clubs
     try {
-      if (club.id && sb) {
-        await updateBudgetDB(club.id, -winningBid);
-      }
-      if (sb) {
-        state.clubs = await fetchClubs();
-        persist();
-      }
+      if (club.id && sb) await updateBudgetDB(club.id, -winningBid);
+      if (sb) { state.clubs = await fetchClubs(); persist(); }
     } catch (e) {
       console.warn("updateBudgetDB/fetchClubs failed:", e);
     }
@@ -382,7 +363,11 @@ async function renderLiveBid(){
   if (!live) return;
 
   const p = (state.players || []).find(x => x.id === state.activeId);
-  if (!p) { live.innerHTML = `<div class="hint">Pick a player via <b>Start Bid</b> above.</div>`; $("passPanel")?.style && ( $("passPanel").style.display = "none"); return; }
+  if (!p) {
+    live.innerHTML = `<div class="hint">Pick a player via <b>Start Bid</b> above.</div>`;
+    if ($("passPanel")) $("passPanel").style.display = "none";
+    return;
+  }
 
   live.innerHTML = `
     <div class="card" style="padding:12px">
@@ -468,27 +453,21 @@ function wireCreateClubUI() {
 }
 
 /* ===========================
-   Demo: minimal import helpers
+   CSV Import (URL + Paste)
 =========================== */
-/* If you already have an Import section that populates state.players, keep it.
-   Below is an optional, simple CSV URL importer. Put your CSV URL into #csvUrl and click #btnImportCsv
-   (columns: id,name,base,category,rank,role)
-*/
-// --- REPLACE your existing wireCsvImportUI() with this ---
-// Drop-in replacement
 function wireCsvImportUI() {
   const urlEl   = document.getElementById("csvUrl");
   const pasteEl = document.getElementById("csvPaste");
   const msgEl   = document.getElementById("importMsg");
 
-  const btnFetch      = document.getElementById("btn-fetch")       || document.getElementById("btnImportCsv");
-  const btnImport     = document.getElementById("btn-import")      || document.getElementById("btnImport");
-  const btnClearUrl   = document.getElementById("btn-clear-url")   || document.getElementById("btnClearUrl");
-  const btnClearPaste = document.getElementById("btn-clear-paste") || document.getElementById("btnClearPaste");
+  const btnFetch      = document.getElementById("btn-fetch");
+  const btnImport     = document.getElementById("btn-import");
+  const btnClearUrl   = document.getElementById("btn-clear-url");
+  const btnClearPaste = document.getElementById("btn-clear-paste");
 
   const setMsg = (t) => { if (msgEl) msgEl.textContent = t; };
 
-  // --- Fetch CSV ---
+  // Fetch CSV
   if (btnFetch && urlEl) {
     btnFetch.onclick = null;
     btnFetch.addEventListener("click", async () => {
@@ -508,7 +487,7 @@ function wireCsvImportUI() {
     });
   }
 
-  // --- Import CSV (with fallback for notes-style rows) ---
+  // Import CSV (with fallback for notes-style rows)
   if (btnImport && pasteEl) {
     btnImport.onclick = null;
     btnImport.addEventListener("click", () => {
@@ -523,7 +502,7 @@ function wireCsvImportUI() {
         const first = rows[0].toLowerCase();
         const headerLike = /(^|,)\s*(name|rank|base|category|role)\s*(,|$)/.test(first);
 
-        const toNum = (v, d=0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+        const toNumLocal = (v, d=0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
         let players = [];
 
         if (headerLike) {
@@ -536,9 +515,9 @@ function wireCsvImportUI() {
             return {
               id: (idI>=0?c[idI]:String(i+1)).trim(),
               name: (nameI>=0?c[nameI]:`Player ${i+1}`).trim(),
-              base: toNum(baseI>=0?c[baseI]:500),
+              base: toNumLocal(baseI>=0?c[baseI]:500),
               category: (catI>=0?c[catI]:"").trim(),
-              rank: toNum(rankI>=0?c[rankI]:i+1),
+              rank: toNumLocal(rankI>=0?c[rankI]:i+1),
               role: (roleI>=0?c[roleI]:"").trim(),
               status: "new",
             };
@@ -558,19 +537,16 @@ function wireCsvImportUI() {
           });
         }
 
-        // Persist minimal state and render
-        const SKEY = "hrb-auction-state";
-        let st = {};
-        try { st = JSON.parse(localStorage.getItem(SKEY) || "{}") || {}; } catch {}
-        st.players = players;
-        st.playersNeeded = st.playersNeeded || 15;
-        st.totalPoints = st.totalPoints || 15000;
-        st.minBasePerPlayer = st.minBasePerPlayer || 500;
-        localStorage.setItem(SKEY, JSON.stringify(st));
+        // Save & render
+        state.players = players;
+        state.playersNeeded = state.playersNeeded || 15;
+        state.totalPoints = state.totalPoints || 15000;
+        state.minBasePerPlayer = state.minBasePerPlayer || 500;
+        persist();
 
-        if (typeof window.render === "function") window.render();
+        render();
         setMsg(`Imported ${players.length} players.`);
-        document.getElementById("playersList")?.scrollIntoView({ behavior:"smooth", block:"start" });
+        $("playersList")?.scrollIntoView({ behavior:"smooth", block:"start" });
       } catch (e) {
         console.error("Import failed:", e);
         setMsg("Import failed. Check console for details.");
@@ -578,7 +554,7 @@ function wireCsvImportUI() {
     });
   }
 
-  // --- Clear buttons ---
+  // Clear buttons
   if (btnClearUrl && urlEl) {
     btnClearUrl.onclick = null;
     btnClearUrl.addEventListener("click", () => { urlEl.value = ""; setMsg(""); });
@@ -596,10 +572,13 @@ async function boot() {
   load();
   await ensureMyClubSeeded();
   wireCreateClubUI();
-  wireCsvImportUI();   // ← this
-  wireStartBidUI?.();  // if you added Start Bid wiring
+  wireCsvImportUI();
+  // (Do NOT call "wireStartBidUI?.()"; that syntax throws if not defined)
   render();
 }
 
+// Expose for index.html safe-loader
+window.boot = window.boot || boot;
+window.render = window.render || render;
 
 document.addEventListener("DOMContentLoaded", () => { boot(); });
