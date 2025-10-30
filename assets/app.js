@@ -285,6 +285,7 @@ Recognized headers (case/spacing doesn't matter):
   Base / Seed / Start Bid (optional; if absent -> base=null)
   Category / Cat (optional)
 */
+// --- REPLACE your parseCSVPlayers with this version ---
 function parseCSVPlayers(raw) {
   const rows = splitCsv(raw).filter(r => r.some(c => String(c).trim() !== ""));
   if (!rows.length) return [];
@@ -314,6 +315,8 @@ function parseCSVPlayers(raw) {
   const iWK     = idx("wk","wicket keeper","is_wk","keeper");
   const iBase   = idx("base","seed","start bid","seed base","base value");
   const iCat    = idx("category","cat");
+  // NEW: phone capture (covers common headings)
+  const iPhone  = idx("phone","phone number","mobile","mobile number","contact","whatsapp","whatsapp number","ph");
 
   const yes = (v) => /^(true|yes|y|1)$/i.test(String(v || "").trim());
 
@@ -331,6 +334,7 @@ function parseCSVPlayers(raw) {
     const isWK   = iWK  >= 0 ? yes(cols[iWK]) : /wk|keeper/i.test(role);
     const base   = (iBase >= 0 && String(cols[iBase]).trim() !== "") ? Number(cols[iBase]) : null;
     const cat    = iCat >= 0 ? String(cols[iCat]).trim() : "";
+    const phone  = iPhone >= 0 ? String(cols[iPhone]).trim() : "";
 
     players.push({
       id: String(rowIdx + 1),
@@ -342,6 +346,7 @@ function parseCSVPlayers(raw) {
       is_wk: !!isWK,
       base,
       category: cat,
+      phone,                 // <— NEW
       status: "new"
     });
   });
@@ -464,35 +469,34 @@ function renderPlayersList() {
   listEl.innerHTML = items || `<div class="hint">No remaining players.</div>`;
 }
 
+// --- REPLACE your renderOtherClubsPanel with this version ---
 function renderOtherClubsPanel() {
-  const root = $("otherClubsPanel");
+  const root = document.getElementById("otherClubsPanel");
   if (!root) return;
-  const others = getOtherClubs();
+
+  const others = (state.clubs || []).filter(c => c.slug !== state.myClubSlug);
   const blocks = others.map(c => {
     const stats = clubStats(c.slug);
     const list = stats.players.length
       ? stats.players.map(p => `
           <div class="item" style="padding:6px 0;border-bottom:1px solid #f3f4f6">
-            <div><b>${p.name}</b></div>
-            <div class="meta">${p.alumni ? p.alumni + " · " : ""}${p.role || ""}${p.category ? " · Cat " + p.category : ""}</div>
-            <div class="meta">Bid: <b>${p.finalBid ?? "-"}</b></div>
+            <div><b>${p.name || "-"}</b></div>
+            <div class="meta">${p.alumni || ""}${p.alumni && p.phone ? " · " : ""}${p.phone || ""}</div>
           </div>
         `).join("")
       : `<div class="hint">No players yet.</div>`;
+
     return `
       <div class="card" style="padding:12px">
-        <div class="row">
-          ${c.logo_url ? `<img src="${c.logo_url}" alt="${c.name}" style="width:36px;height:36px;border-radius:999px;object-fit:cover;margin-right:8px;" />`
-                        : `<div style="width:36px;height:36px;border-radius:999px;background:#e5e7eb;margin-right:8px;"></div>`}
-          <div>
-            <div class="title"><b>${c.name}</b></div>
-            <div class="meta">Players: ${stats.count} • Spend: ${stats.spend} • Budget left: ${stats.budgetLeft}</div>
-          </div>
+        <div class="row" style="gap:8px;align-items:center">
+          ${c.logo_url ? `<img src="${c.logo_url}" alt="${c.name}" style="width:28px;height:28px;border-radius:999px;object-fit:cover;" />` : ""}
+          <div><b>${c.name}</b></div>
         </div>
         <div style="margin-top:10px; max-height:220px; overflow:auto;">${list}</div>
       </div>
     `;
   }).join("");
+
   root.innerHTML = blocks || `<div class="hint">Add clubs to see their squads.</div>`;
 }
 
@@ -826,6 +830,7 @@ function render() {
   renderSelectedSquad();   // ← add this line
 }
 
+// --- REPLACE your renderSelectedSquad with this version ---
 function renderSelectedSquad() {
   const root = document.getElementById("selectedList");
   if (!root) return;
@@ -835,7 +840,7 @@ function renderSelectedSquad() {
 
   const header = `
     <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
-      <div class="meta">Players: <b>${stats.count}</b> • Spend: <b>${stats.spend}</b> • Budget left: <b>${stats.budgetLeft}</b></div>
+      <div class="meta">Players: <b>${stats.count}</b></div>
     </div>
   `;
 
@@ -846,22 +851,52 @@ function renderSelectedSquad() {
 
   const list = players.map(p => `
     <div class="card" style="padding:8px;margin-bottom:6px">
-      <div class="row" style="justify-content:space-between;gap:6px">
-        <div>
-          <div><b>${p.name}</b></div>
-          <div class="meta">
-            ${p.alumni ? p.alumni + " · " : ""}${p.role || ""}
-            ${p.category ? " · Cat " + p.category : ""}
-            ${p.rating != null ? " · Rating " + p.rating : ""}
-          </div>
-        </div>
-        <div class="meta">Bid: <b>${p.finalBid ?? "-"}</b></div>
-      </div>
+      <div><b>${p.name || "-"}</b></div>
+      <div class="meta">${p.alumni || ""}${p.alumni && p.phone ? " · " : ""}${p.phone || ""}</div>
     </div>
-  `).join("");
+  }).join("");
 
   root.innerHTML = header + list;
 }
+// --- ADD/REPLACE: make a flat CSV of all won players for coordination ---
+function exportWonCSV() {
+  const won = (state.players || []).filter(p => p.status === "won");
+  const rows = [
+    ["Club", "Player Name", "Alumni", "Phone"]
+  ];
+  won.forEach(p => {
+    const club = (state.clubs || []).find(c => c.slug === p.owner);
+    rows.push([
+      club ? club.name : (p.owner || ""),
+      p.name || "",
+      p.alumni || "",
+      p.phone || ""
+    ]);
+  });
+
+  const csv = rows.map(r => r.map(v => {
+    const s = String(v ?? "");
+    return (/[",\n]/.test(s)) ? `"${s.replace(/"/g, '""')}"` : s;
+  }).join(",")).join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url  = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "auction-won-contacts.csv";
+  document.body.appendChild(a);
+  a.click();
+  URL.revokeObjectURL(url);
+  a.remove();
+}
+
+// --- Ensure the Export button calls it (do this in boot() or once on DOM ready) ---
+(function wireExportButton(){
+  const btn = document.getElementById("btn-export");
+  if (!btn) return;
+  btn.onclick = null;
+  btn.addEventListener("click", exportWonCSV);
+})();
 
 async function boot() {
   load();
