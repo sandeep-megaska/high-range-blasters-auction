@@ -284,38 +284,44 @@ function renderPlayersList() {
   const root = $("playersList");
   if (!root) return;
   const items = (state.players || []).map(p => {
-    const ownerName = p.owner ? ((state.clubs || []).find(c => c.slug === p.owner)?.name || p.owner) : "";
-    return `
-      <div class="card" style="padding:10px;margin-bottom:8px">
-        <div class="row" style="justify-content:space-between;gap:8px">
-          <div>
-            <div><b>${p.name || "-"}</b></div>
-           <div class="meta">Cat ${p.category ?? "-"} · ${p.role || ""}</div>
+  const ownerName = p.owner ? ((state.clubs || []).find(c => c.slug === p.owner)?.name || p.owner) : "";
 
-          </div>
-          const pr = classifyPriority(p.rating);
-const need = rosterNeeds();
-const needBits = [
-  (p.is_wk && need.wkNeed > 0) ? `Need WK (${need.wkNeed} left)` : "",
-  (isRightHand(p.batting_hand) && need.rhNeed > 0) ? `Need Right-hand bat (${need.rhNeed} left)` : ""
-].filter(Boolean).join(" · ");
+  // --- NEW: priority + needs, build safe strings ---
+  const pr = classifyPriority(p.rating);
+  const need = rosterNeeds();
+  const needBitsArr = [];
+  if (p.is_wk && need.wkNeed > 0) needBitsArr.push(`Need WK (${need.wkNeed} left)`);
+  if (isRightHand(p.batting_hand) && need.rhNeed > 0) needBitsArr.push(`Need Right-hand bat (${need.rhNeed} left)`);
+  const needBits = needBitsArr.join(" · ");
 
-<div class="meta">
-  ${priorityBadge(pr)}
-  ${p.rating != null ? ` · Rating ${p.rating}` : ""}
-  ${p.category ? ` · Cat ${p.category}` : ""}
-  ${p.role ? ` · ${p.role}` : ""}
-  ${p.base != null ? ` · Seed ${p.base}` : ""}
-  ${needBits ? ` · <span style="color:#065f46">${needBits}</span>` : ""}
-</div>
+  let metaPieces = [];
+  metaPieces.push(priorityBadge(pr));
+  if (p.rating != null) metaPieces.push(`Rating ${p.rating}`);
+  if (p.category)       metaPieces.push(`Cat ${p.category}`);
+  if (p.role)           metaPieces.push(p.role);
+  if (p.base != null)   metaPieces.push(`Seed ${p.base}`);
+  if (needBits)         metaPieces.push(`<span style="color:#065f46">${needBits}</span>`);
+  const metaHTML = metaPieces.join(" · ");
 
+  return `
+    <div class="card" style="padding:10px;margin-bottom:8px">
+      <div class="row" style="justify-content:space-between;gap:8px">
+        <div>
+          <div><b>${p.name || "-"}</b></div>
+          <div class="meta">${metaHTML}</div>
         </div>
-        <div class="row" style="gap:6px;margin-top:8px">
-          <button class="btn" data-action="start" data-id="${p.id}">Start Bid</button>
+        <div class="meta">
+          ${p.status === "won"
+            ? `Won by <b>${ownerName}</b>${p.finalBid != null ? ` @ <b>${p.finalBid}</b>` : ""}`
+            : (p.status === "lost" ? `Passed` : ``)}
         </div>
       </div>
-    `;
-  }).join("");
+      <div class="row" style="gap:6px;margin-top:8px">
+        <button class="btn" data-action="start" data-id="${p.id}">Start Bid</button>
+      </div>
+    </div>
+  `;
+}).join("");
   root.innerHTML = items || `<div class="hint">Import players to begin.</div>`;
 
   // wire
@@ -440,24 +446,27 @@ async function renderLiveBid(){
     if ($("passPanel")) $("passPanel").style.display = "none";
     return;
   }
+// --- NEW advice panel (safe strings) ---
 const pr = classifyPriority(p.rating);
 const need = rosterNeeds();
-const advice = [];
-if (pr === "must") advice.push("High rating – recommended to bid.");
-else if (pr === "try") advice.push("Good rating – consider bidding.");
-else advice.push("Low priority – bid only if price is right.");
 
-if (p.is_wk && need.wkNeed > 0) advice.push(`Team still needs WKs (${need.wkNeed} remaining).`);
-if (isRightHand(p.batting_hand) && need.rhNeed > 0) advice.push(`Team needs Right-hand batters (${need.rhNeed} remaining).`);
+const adviceParts = [];
+if (pr === "must")      adviceParts.push("High rating – recommended to bid.");
+else if (pr === "try")  adviceParts.push("Good rating – consider bidding.");
+else                    adviceParts.push("Low priority – bid only if price is right.");
 
-live.insertAdjacentHTML("beforeend", `
-  <div class="card" style="margin-top:8px;padding:10px;background:#f8fafc;border-left:4px solid #0ea5e9">
-    <div class="row" style="gap:8px;align-items:center">
-      ${priorityBadge(pr)}
-      <span>${advice.join(" ")}</span>
-    </div>
-  </div>
-`);
+if (p.is_wk && need.wkNeed > 0) adviceParts.push(`Team still needs WKs (${need.wkNeed} remaining).`);
+if (isRightHand(p.batting_hand) && need.rhNeed > 0) adviceParts.push(`Team needs Right-hand batters (${need.rhNeed} remaining).`);
+
+const adviceHTML =
+  `<div class="card" style="margin-top:8px;padding:10px;background:#f8fafc;border-left:4px solid #0ea5e9">
+     <div class="row" style="gap:8px;align-items:center">
+       ${priorityBadge(pr)}
+       <span>${adviceParts.join(" ")}</span>
+     </div>
+   </div>`;
+
+live.insertAdjacentHTML("beforeend", adviceHTML);
 
   live.innerHTML = `
     <div class="card" style="padding:12px">
