@@ -1,5 +1,16 @@
-// assets/app.js — Tournament edition (typeahead + ranks + category bases)
-import { sb, fetchClubs, createClubDB, updateClubDB, deleteClubDB, adjustBudgetDB, onClubsRealtime, loadConstraintsFromSupabase, loadSettingsFromSupabase } from "./supabaseClient.js";
+// KEEP just this one from supabaseClient.js
+import {
+  sb,
+  fetchClubs,
+  createClubDB,
+  updateClubDB,
+  deleteClubDB,
+  adjustBudgetDB,
+  onClubsRealtime,
+  loadConstraintsFromSupabase,
+  loadSettingsFromSupabase
+} from "./supabaseClient.js";
+
 
 import {
   STORAGE_KEY,
@@ -18,10 +29,7 @@ import {
   tierFromScore
 } from "./constraints.js";
 
-import {
-  loadConstraintsFromSupabase,
-  loadSettingsFromSupabase
-} from "./supabaseClient.js";
+
 
 // -------- Auth ----------
 const AUTH_USER = "HRB";
