@@ -1,65 +1,26 @@
-/* assets/app.js — HRB Auction Assist (clubs + pass panel + local/Supabase)
-   Works with or without Supabase.
-   If you want Supabase, set window.ENV = { SUPABASE_URL, SUPABASE_ANON_KEY } in index.html
-   AND load the UMD BEFORE this module:
-     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+/* assets/app.js — HRB Auction Assist (clean build, no ellipses)
+   Works standalone with localStorage. Supabase is optional.
 */
 
-// ===========================
-// HRB rules (tweak anytime)
-// ===========================
-const RULES = {
-  minWK: 2,               // need at least 2 wicket keepers
-  minRightBat: 2,         // need at least 2 right-hand batters
-  ratingThresholds: {     // interpret your sheet's rating (e.g., 1–10)
-    must: 9,              // >= 9  → Must bid
-    try:  7               // 7–8.9 → Try
-  }
-};
-
-function isRightHand(battingHand) {
-  const s = (battingHand || "").toLowerCase();
-  return /right/.test(s) || /\brhb\b/.test(s) || s === "r";
-}
-
-function rosterNeeds() {
-  const mine = (state.players || []).filter(p => p.status === "won" && p.owner === state.myClubSlug);
-  const wkHave = mine.filter(p => p.is_wk).length;
-  const rhHave = mine.filter(p => isRightHand(p.batting_hand)).length;
-  return {
-    wkNeed: Math.max(0, RULES.minWK - wkHave),
-    rhNeed: Math.max(0, RULES.minRightBat - rhHave)
-  };
-}
-
-function classifyPriority(rating) {
-  if (rating == null) return "—";
-  if (rating >= RULES.ratingThresholds.must) return "must";
-  if (rating >= RULES.ratingThresholds.try)  return "try";
-  return "last";
-}
-
-function priorityBadge(priority) {
-  const map = { must: "#166534", try: "#1d4ed8", last: "#6b7280", "—": "#6b7280" };
-  const label = { must: "Must bid", try: "Try", last: "Last pref.", "—": "No rating" }[priority] || priority;
-  return `<span style="display:inline-block;padding:2px 6px;border-radius:999px;font-size:12px;color:#fff;background:${map[priority] || "#6b7280"}">${label}</span>`;
-}
-
-// ===========================
-// State & persistence
-// ===========================
+/* ===========================
+   State & Persistence
+=========================== */
 let state = {
-  // players & auction
-  players: [],             // [{id,name,rating,alumni,role,batting_hand,is_wk,base,category,status,finalBid,owner}]
+  // players
+  players: [],            // {id,name,alumni,phone,role,batting_hand,is_wk,rating,category,base,status,finalBid,owner}
+  queue: [],              // ids for quick next/prev if you ever use it
+
+  // guardrails/budget
   totalPoints: 15000,
   playersNeeded: 15,
-  minBasePerPlayer: 500,
-  activeId: null,          // current active player ID (from picker)
-  log: [],
+  minBasePerPlayer: 500,  // guardrail floor per remaining slot
 
-  // my club + other clubs
+  // clubs
   myClubSlug: "high-range-blasters",
-  clubs: [],               // [{id,slug,name,logo_url,starting_budget,budget_left}]
+  clubs: [],              // {id,slug,name,logo_url,starting_budget,budget_left}
+
+  // ui
+  activePlayerId: null
 };
 
 function persist() {
@@ -72,68 +33,45 @@ function load() {
   } catch {}
 }
 
-// ===========================
-// Utilities
-// ===========================
-function $(id) { return document.getElementById(id); }
+/* ===========================
+   Utilities
+=========================== */
+const $  = (id) => document.getElementById(id);
+const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 
-function slugify(name) {
-  return String(name || "")
+function slugify(s) {
+  return String(s || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "")
-    .slice(0, 60);
+    .replace(/(^-|-$)/g, "");
 }
-
-function toNum(v, fallback = 0) {
+function toNum(v, def=0) {
   const n = Number(v);
-  return Number.isFinite(n) ? n : Number(fallback) || 0;
+  return Number.isFinite(n) ? n : def;
 }
-
-function findPlayerById(id) {
-  return (state.players || []).find(p => String(p.id) === String(id));
-}
-
-function getClubBySlug(slug) {
-  return (state.clubs || []).find(c => c.slug === slug);
-}
-
-function remainingPlayers() {
-  return (state.players || []).filter(p => p.status !== "won" && p.status !== "lost");
-}
-
 function remainingSlots() {
-  const my = clubStats(state.myClubSlug);
-  const taken = my.count;
-  return Math.max(0, (state.playersNeeded || 15) - taken);
+  const mine = (state.players || []).filter(p => p.owner === state.myClubSlug && p.status === "won").length;
+  return Math.max(0, (state.playersNeeded || 15) - mine);
 }
-
+function remainingBudget(clubSlug) {
+  const club = (state.clubs || []).find(c => c.slug === clubSlug);
+  if (!club) return 0;
+  return toNum(club.budget_left, club.starting_budget || 0);
+}
 function guardrailOK(bid) {
-  const slotsLeft = remainingSlots();
-  const my = clubStats(state.myClubSlug);
-  const start = my.club ? (my.club.starting_budget ?? 15000) : (state.totalPoints || 15000);
-  const spent = my.spend;
-  const budgetLeft = Math.max(0, (typeof my.budgetLeft === "number" ? my.budgetLeft : start - spent));
-  const reserve = Math.max(0, (slotsLeft - 1) * (state.minBasePerPlayer || 500));
-  return bid <= Math.max(0, budgetLeft - reserve);
+  const rem = remainingSlots();
+  const floor = state.minBasePerPlayer || 500;
+  const budget = remainingBudget(state.myClubSlug);
+  // Keep both: enough to fill future slots AND within our budget.
+  return bid <= budget && budget - bid >= (rem - 1) * floor;
+}
+function normalizeHeader(s) {
+  return String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function clearPicker() {
-  const input = $("startName");
-  if (input) input.value = "";
-}
-
-function afterAssignmentRefresh() {
-  persist();
-  render();
-  clearPicker();
-  const passPanel = $("passPanel");
-  if (passPanel) passPanel.style.display = "none";
-}
-
-// ===========================
-// Supabase (optional)
-// ===========================
+/* ===========================
+   Supabase (optional)
+=========================== */
 function supabaseAvailable() {
   return !!(window.ENV?.SUPABASE_URL && window.ENV?.SUPABASE_ANON_KEY && window.supabase?.createClient);
 }
@@ -142,73 +80,42 @@ if (supabaseAvailable()) {
   sb = window.supabase.createClient(window.ENV.SUPABASE_URL, window.ENV.SUPABASE_ANON_KEY);
 }
 
-// DB helpers (no-ops if Supabase not present)
+// clubs table helpers (no-ops if Supabase missing). You can wire these later.
 async function fetchClubs() {
   if (!sb) return state.clubs || [];
   const { data, error } = await sb.from("clubs").select("*").order("name", { ascending: true });
   if (error) throw error;
   return data || [];
 }
-async function createClubDB({ slug, name, logo_url, starting_budget }) {
-  if (!sb) return;
-  const { error } = await sb.from("clubs").insert({
-    slug, name, logo_url: logo_url || null,
-    starting_budget: starting_budget ?? 15000,
-    budget_left: starting_budget ?? 15000
-  });
+async function createClubDB(payload) {
+  if (!sb) return null;
+  const { error } = await sb.from("clubs").insert(payload);
   if (error) throw error;
+  return true;
 }
-async function updateBudgetDB(club_id, delta) {
-  if (!sb) return;
-  const { error } = await sb.rpc("adjust_budget", { p_club_id: club_id, p_delta: delta });
+async function updateClubBudget(slug, budget_left) {
+  if (!sb) return null;
+  const { error } = await sb.from("clubs").update({ budget_left }).eq("slug", slug);
   if (error) throw error;
+  return true;
 }
 
-// ===========================
-// Clubs core
-// ===========================
-function getOtherClubs() {
-  const all = Array.isArray(state.clubs) ? state.clubs : [];
-  return all.filter(c => c.slug !== state.myClubSlug);
-}
-
-function clubStats(slug) {
-  const club = (state.clubs || []).find(c => c.slug === slug);
-  if (!club) return { club: null, count: 0, spend: 0, budgetLeft: 0, players: [] };
-  const players = (state.players || []).filter(p => p.status === "won" && p.owner === slug);
-  const spend = players.reduce((s, p) => s + (toNum(p.finalBid, 0)), 0);
-  const dbLeft = (typeof club.budget_left === "number") ? club.budget_left : null;
-  const start = toNum(club.starting_budget ?? state.totalPoints, state.totalPoints);
-  const derivedLeft = Math.max(0, start - spend);
-  return { club, count: players.length, spend, budgetLeft: dbLeft ?? derivedLeft, players };
-}
-
+/* ===========================
+   Clubs: local helpers
+=========================== */
 async function ensureMyClubSeeded() {
-  try {
-    state.clubs = await fetchClubs();
-  } catch (e) {
-    console.warn("fetchClubs failed:", e);
-    state.clubs = state.clubs || [];
-  }
-  const hrbSlug = state.myClubSlug;
-  const found = state.clubs.find(c => c.slug === hrbSlug);
-  if (!found) {
+  if (!state.clubs) state.clubs = [];
+  const exists = state.clubs.some(c => c.slug === state.myClubSlug);
+  if (!exists) {
     const start = state.totalPoints || 15000;
-    if (sb) {
-      try {
-        await createClubDB({ slug: hrbSlug, name: "High Range Blasters", logo_url: "./assets/hrb.svg", starting_budget: start });
-        state.clubs = await fetchClubs();
-      } catch (e) {
-        console.warn("createClubDB failed, falling back local:", e);
-        state.clubs.push({ id: "local-hrb", slug: hrbSlug, name: "High Range Blasters", logo_url: "./assets/hrb.svg", starting_budget: start, budget_left: start });
-      }
-    } else {
-      state.clubs.push({ id: "local-hrb", slug: hrbSlug, name: "High Range Blasters", logo_url: "./assets/hrb.svg", starting_budget: start, budget_left: start });
-    }
+    const hrb = { id: `local-${Date.now()}`, slug: state.myClubSlug, name: "High Range Blasters", logo_url: "./assets/highrange.svg", starting_budget: start, budget_left: start };
+    state.clubs.push(hrb);
+    persist();
   }
-  persist();
 }
-
+function getOtherClubs() {
+  return (state.clubs || []).filter(c => c.slug !== state.myClubSlug);
+}
 async function addClubLocal({ name, logo_url, starting_budget }) {
   if (!state.clubs) state.clubs = [];
   const slug = slugify(name);
@@ -219,73 +126,45 @@ async function addClubLocal({ name, logo_url, starting_budget }) {
     id: `local-${Date.now()}`,
     slug,
     name: name.trim(),
-    logo_url: logo_url || null,
+    logo_url: logo_url || "",
     starting_budget: start,
     budget_left: start
   });
   persist();
 }
-
-async function addClubAndRefresh({ name, logo_url, starting_budget }) {
-  const slug = slugify(name);
-  if (!slug) throw new Error("Club name required.");
-
-  const start = toNum(starting_budget, 15000);
-  if (sb) {
-    await createClubDB({ slug, name: name.trim(), logo_url: (logo_url || null), starting_budget: start });
-    state.clubs = await fetchClubs();
-    persist();
-  } else {
-    await addClubLocal({ name, logo_url, starting_budget: start });
-  }
+function clubStats(slug) {
+  const players = (state.players || []).filter(p => p.owner === slug && p.status === "won");
+  const spend = players.reduce((s, p) => s + toNum(p.finalBid, 0), 0);
+  const c = (state.clubs || []).find(c => c.slug === slug);
+  const budgetLeft = c ? toNum(c.starting_budget, 0) - spend : 0;
+  return { players, count: players.length, spend, budgetLeft };
 }
 
-// ===========================
-// CSV parsing
-// ===========================
+/* ===========================
+   CSV parsing
+=========================== */
 function splitCsv(text) {
+  // simple CSV splitter (handles quotes)
   const rows = [];
-  let cur = [], field = "", inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i], next = text[i+1];
-    if (inQuotes) {
-      if (ch === '"' && next === '"') { field += '"'; i++; }
-      else if (ch === '"') { inQuotes = false; }
-      else { field += ch; }
-    } else {
-      if (ch === '"') inQuotes = true;
-      else if (ch === ',') { cur.push(field); field = ""; }
-      else if (ch === '\n' || ch === '\r') {
-        if (field.length || cur.length) { cur.push(field); rows.push(cur); }
-        field = ""; cur = [];
-        if (ch === '\r' && next === '\n') i++;
-      } else field += ch;
+  let row = [], cell = "", inQ = false;
+  for (let i=0; i<text.length; i++) {
+    const ch = text[i], nx = text[i+1];
+    if (inQ) {
+      if (ch === '"' && nx === '"') { cell += '"'; i++; continue; }
+      if (ch === '"') { inQ = false; continue; }
+      cell += ch;
+      continue;
     }
+    if (ch === '"') { inQ = true; continue; }
+    if (ch === ",") { row.push(cell); cell=""; continue; }
+    if (ch === "\n") { row.push(cell); rows.push(row); row=[]; cell=""; continue; }
+    cell += ch;
   }
-  if (field.length || cur.length) { cur.push(field); rows.push(cur); }
+  row.push(cell);
+  rows.push(row);
   return rows;
 }
-function normalizeHeader(h) {
-  return String(h || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .replace(/[._-]+/g, " ");
-}
 
-/*
-STRICT parser — your CSV is the source of truth.
-Recognized headers (case/spacing doesn't matter):
-  Name / Player Name (required)
-  Rating / Rank / Rating10 / Grade (stored as .rating for priority)
-  Alumni / College / Institute (optional; shown in type-ahead)
-  Role / Playing Role / Type (optional)
-  Batting Hand / Batting_Hand / Hand (optional; "Right", "RHB")
-  WK / Wicket Keeper / Is_WK / Keeper (optional; yes/true/1)
-  Base / Seed / Start Bid (optional; if absent -> base=null)
-  Category / Cat (optional)
-*/
-// --- REPLACE your parseCSVPlayers with this version ---
 function parseCSVPlayers(raw) {
   const rows = splitCsv(raw).filter(r => r.some(c => String(c).trim() !== ""));
   if (!rows.length) return [];
@@ -307,16 +186,16 @@ function parseCSVPlayers(raw) {
     return -1;
   };
 
-  const iName   = idx("name","player name","player");
-  const iRate   = idx("rating","rank","rating10","grade");
-  const iAlmn   = idx("alumni","college","institute");
-  const iRole   = idx("role","playing role","type");
-  const iHand   = idx("batting hand","batting_hand","hand");
-  const iWK     = idx("wk","wicket keeper","is_wk","keeper");
-  const iBase   = idx("base","seed","start bid","seed base","base value");
-  const iCat    = idx("category","cat");
-  // NEW: phone capture covers common headings
-  const iPhone  = idx("phone","phone number","mobile","mobile number","contact","whatsapp","whatsapp number","ph");
+  const iName  = idx("name","player name","player");
+  const iRate  = idx("rating","rank","rating10","grade");
+  const iAlmn  = idx("alumni","college","institute");
+  const iRole  = idx("role","playing role","type");
+  const iHand  = idx("batting hand","batting_hand","hand");
+  const iWK    = idx("wk","wicket keeper","is_wk","keeper");
+  const iBase  = idx("base","seed","start bid","seed base","base value");
+  const iCat   = idx("category","cat");
+  // phone capture (covers common headings)
+  const iPhone = idx("phone","phone number","mobile","mobile number","contact","whatsapp","whatsapp number","ph");
 
   const yes = (v) => /^(true|yes|y|1)$/i.test(String(v || "").trim());
 
@@ -339,14 +218,14 @@ function parseCSVPlayers(raw) {
     players.push({
       id: String(rowIdx + 1),
       name,
-      rating,
       alumni,
+      phone,
       role,
       batting_hand: hand,
       is_wk: !!isWK,
-      base,
-      category: cat,
-      phone,                 // <— NEW
+      rating,
+      category: cat || null,
+      base: base == null ? null : base,
       status: "new"
     });
   });
@@ -354,128 +233,130 @@ function parseCSVPlayers(raw) {
   return players;
 }
 
-// Accept /edit, /view or published CSV links and make them fetchable
-function normalizeGsheetsCsvUrl(url) {
-  if (/[\?&]output=csv\b/i.test(url)) return url; // already CSV
-  const m = url.match(/https:\/\/docs\.google\.com\/spreadsheets\/d\/([^/]+)/i);
-  if (!m) return url; // not a sheets URL
-  const id = m[1];
-  const gidMatch = url.match(/[?#&]gid=(\d+)/i);
-  const gid = gidMatch ? gidMatch[1] : null;
-  const base = `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv`;
-  return gid ? `${base}&gid=${gid}` : base;
+/* ===========================
+   Players & Bid Flow
+=========================== */
+function setActivePlayer(id) {
+  state.activePlayerId = id || null;
+  persist();
+  renderLiveBid();
+}
+function getActivePlayer() {
+  return (state.players || []).find(p => p.id === state.activePlayerId) || null;
 }
 
-// ===========================
-// Players & live bid
-// ===========================
-function setActivePlayer(id) {
-  state.activeId = id;
+function markWon(playerId, price) {
+  const p = (state.players || []).find(x => x.id === playerId);
+  if (!p) return;
+  const bid = toNum(price, p.base || 0);
+  if (!guardrailOK(bid)) {
+    alert("Guardrail violated. Reduce bid.");
+    return;
+  }
+  p.status = "won";
+  p.finalBid = bid;
+  p.owner = state.myClubSlug;
+
+  // adjust HRB budget
+  const c = (state.clubs || []).find(c => c.slug === state.myClubSlug);
+  if (c) {
+    c.budget_left = toNum(c.budget_left, c.starting_budget || 0) - bid;
+    if (c.budget_left < 0) c.budget_left = 0;
+  }
   persist();
   render();
 }
 
-function getActivePlayer() {
-  const id = state.activeId;
-  if (!id) return null;
-  return (state.players || []).find(p => String(p.id) === String(id)) || null;
-}
-
-// HRB wins
-async function markWon(playerId, finalBid) {
-  const p = findPlayerById(playerId);
-  if (!p) { alert("Player not found."); return; }
-  const price = Number(finalBid);
-  if (!Number.isFinite(price) || price < 0) { alert("Enter a valid final bid."); return; }
-  if (!guardrailOK(price)) { alert("Guardrail violated. Reduce bid."); return; }
-
-  p.status   = "won";
-  p.owner    = state.myClubSlug;
-  p.finalBid = price;
-
-  // optional budget deduction (derived anyway in UI)
-  const me = getClubBySlug(state.myClubSlug);
-  if (me && typeof me.budget_left === "number") {
-    me.budget_left = Math.max(0, me.budget_left - price);
-  }
-
-  afterAssignmentRefresh();
-}
-
-// Pass → assign to other club
-async function assignToClub(playerId, clubSlugOrName, priceInput) {
-  const p = findPlayerById(playerId);
-  if (!p) { alert("Player not found."); return; }
-
-  const s = (clubSlugOrName || "").trim().toLowerCase();
+function assignToClubByNameOrSlug(playerId, clubText, price) {
   const others = getOtherClubs();
-  const club = others.find(c => (c.slug || "").toLowerCase() === s) ||
-               others.find(c => (c.name || "").toLowerCase() === s) ||
-               others.find(c => (c.name || "").toLowerCase().startsWith(s));
+  let club = others.find(c => c.slug === clubText);
   if (!club) {
-    const hint = $("passPanelMsg"); if (hint) hint.textContent = "Pick a valid club from the list.";
-    alert("Pick a valid club from the list.");
+    const name = String(clubText || "").trim().toLowerCase();
+    club = others.find(c => (c.name || "").toLowerCase() === name) ||
+           others.find(c => (c.name || "").toLowerCase().startsWith(name));
+  }
+  if (!club) {
+    const msg = $("passPanelMsg");
+    if (msg) msg.textContent = "Pick a valid club from the list or start typing its name.";
     return;
   }
+  const p = (state.players || []).find(x => x.id === playerId);
+  if (!p) return;
 
-  const price = Number(priceInput);
-  if (!Number.isFinite(price) || price < 0) {
-    const hint = $("passPanelMsg"); if (hint) hint.textContent = "Enter a valid winning price.";
-    alert("Enter a valid winning price.");
-    return;
-  }
+  const bid = Math.max(0, toNum(price, p.base || 0));
+  p.status = "won";
+  p.finalBid = bid;
+  p.owner = club.slug;
 
-  p.status   = "won";
-  p.owner    = club.slug;
-  p.finalBid = price;
+  club.budget_left = toNum(club.budget_left, club.starting_budget || 0) - bid;
+  if (club.budget_left < 0) club.budget_left = 0;
 
-  try {
-    if (club.id && sb) await updateBudgetDB(club.id, -price);
-    if (sb) { state.clubs = await fetchClubs(); persist(); }
-  } catch (e) {
-    console.warn("Budget update failed:", e);
-  }
-
-  afterAssignmentRefresh();
+  persist();
+  render();
 }
 
-// ===========================
-// Rendering
-// ===========================
+/* ===========================
+   Renderers
+=========================== */
 function renderPlayersList() {
-  const listEl  = $("playersList");
-  const countEl = $("playersCount");
-  if (!listEl) return;
-
-  const remain = remainingPlayers();
-  if (countEl) countEl.textContent = `(${remain.length} left)`;
-
-  const items = remain.map(p => {
-    const bits = [];
-    if (p.rating != null) bits.push(`Rating ${p.rating}`);
-    if (p.category)       bits.push(`Cat ${p.category}`);
-    if (p.role)           bits.push(p.role);
-    if (p.alumni)         bits.push(p.alumni);
-    const meta = bits.join(" · ");
-
-    return `
-      <div class="card" style="padding:10px;margin-bottom:8px">
-        <div><b>${p.name || "-"}</b></div>
-        <div class="meta">${meta}</div>
-      </div>
-    `;
-  }).join("");
-
-  listEl.innerHTML = items || `<div class="hint">No remaining players.</div>`;
-}
-
-// --- REPLACE your renderOtherClubsPanel with this version ---
-function renderOtherClubsPanel() {
-  const root = document.getElementById("otherClubsPanel");
+  const root = $("playersList");
+  const counter = $("playersCount");
   if (!root) return;
 
-  const others = (state.clubs || []).filter(c => c.slug !== state.myClubSlug);
-  const blocks = others.map(c => {
+  // show only remaining players (not yet assigned to any club)
+  const remaining = (state.players || []).filter(p => p.status !== "won");
+  if (counter) counter.textContent = `(${remaining.length})`;
+
+  const cards = remaining.map(p => `
+    <div class="item" style="padding:10px;border-bottom:1px solid #eee">
+      <div class="row" style="justify-content:space-between;gap:8px">
+        <div>
+          <div><b>${p.name}</b></div>
+          <div class="meta">${p.alumni || ""}${p.alumni && p.phone ? " · " : ""}${p.phone || ""}</div>
+        </div>
+        <button class="btn btn-ghost" data-id="${p.id}" data-action="pick">Pick</button>
+      </div>
+    </div>
+  `).join("");
+
+  root.innerHTML = cards || `<div class="hint">Import players to begin.</div>`;
+
+  root.querySelectorAll("[data-action='pick']").forEach(btn => {
+    btn.addEventListener("click", () => setActivePlayer(btn.getAttribute("data-id")));
+  });
+}
+
+function renderSelectedSquad() {
+  const root = $("selectedList");
+  if (!root) return;
+
+  const stats = clubStats(state.myClubSlug);
+  const header = `
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div class="meta">Players: <b>${stats.count}</b></div>
+    </div>
+  `;
+
+  if (!stats.players.length) {
+    root.innerHTML = header + `<div class="hint">No players won yet.</div>`;
+    return;
+  }
+
+  const list = stats.players.map(p => `
+    <div class="card" style="padding:8px;margin-bottom:6px">
+      <div><b>${p.name || "-"}</b></div>
+      <div class="meta">${p.alumni || ""}${p.alumni && p.phone ? " · " : ""}${p.phone || ""}</div>
+    </div>
+  `).join("");
+
+  root.innerHTML = header + list;
+}
+
+function renderOtherClubsPanel() {
+  const root = $("otherClubsPanel");
+  if (!root) return;
+
+  const blocks = getOtherClubs().map(c => {
     const stats = clubStats(c.slug);
     const list = stats.players.length
       ? stats.players.map(p => `
@@ -489,10 +370,10 @@ function renderOtherClubsPanel() {
     return `
       <div class="card" style="padding:12px">
         <div class="row" style="gap:8px;align-items:center">
-          ${c.logo_url ? `<img src="${c.logo_url}" alt="${c.name}" style="width:28px;height:28px;border-radius:999px;object-fit:cover;" />` : ""}
+          ${c.logo_url ? `<img src="${c.logo_url}" alt="${c.name}" style="width:28px;height:28px;border-radius:999px;object-fit:cover" />` : ""}
           <div><b>${c.name}</b></div>
         </div>
-        <div style="margin-top:10px; max-height:220px; overflow:auto;">${list}</div>
+        <div style="margin-top:10px;max-height:220px;overflow:auto">${list}</div>
       </div>
     `;
   }).join("");
@@ -500,169 +381,124 @@ function renderOtherClubsPanel() {
   root.innerHTML = blocks || `<div class="hint">Add clubs to see their squads.</div>`;
 }
 
-function renderAdvice(liveEl, p) {
-  try {
-    const pr = classifyPriority(p.rating);
-    const need = rosterNeeds();
-    const adviceParts = [];
-    if (pr === "must") adviceParts.push("High rating – recommended to bid.");
-    else if (pr === "try") adviceParts.push("Good rating – consider bidding.");
-    else adviceParts.push("Low priority – bid only if price is right.");
-    if (p.is_wk && need.wkNeed > 0) adviceParts.push(`Team still needs WKs (${need.wkNeed} remaining).`);
-    if (isRightHand(p.batting_hand) && need.rhNeed > 0) adviceParts.push(`Team needs Right-hand batters (${need.rhNeed} remaining).`);
-
-    const adviceHTML =
-      `<div class="card" style="margin-top:8px;padding:10px;background:#f8fafc;border-left:4px solid #0ea5e9">
-         <div class="row" style="gap:8px;align-items:center">
-           ${priorityBadge(pr)}
-           <span>${adviceParts.join(" ")}</span>
-         </div>
-       </div>`;
-    liveEl.insertAdjacentHTML("beforeend", adviceHTML);
-  } catch (_) {}
-}
-
-async function renderLiveBid() {
-  const live = document.getElementById("liveBid");
+function renderLiveBid() {
+  const live = $("liveBid");
   if (!live) return;
 
   const p = getActivePlayer();
   if (!p) {
-    live.innerHTML = `<div class="hint">No active player. Use the Name picker to select the announced player.</div>`;
+    live.innerHTML = `<div class="hint">No active player. Use the Name picker or click Pick on the list.</div>`;
     return;
   }
 
-  const bits = [];
-  if (p.alumni)   bits.push(p.alumni);
-  if (p.rating != null) bits.push(`Rating ${p.rating}`);
-  if (p.category) bits.push(`Cat ${p.category}`);
-  if (p.role)     bits.push(p.role);
-  const meta = bits.join(" · ");
-
   live.innerHTML = `
-    <div class="card" style="padding:12px;">
-      <div class="row" style="justify-content:space-between;gap:8px">
-        <div>
-          <div style="font-size:18px;font-weight:700">${p.name}</div>
-          ${meta ? `<div class="meta">${meta}</div>` : ``}
-        </div>
-      </div>
+    <div class="card" style="padding:12px">
+      <div style="font-size:18px;font-weight:700">${p.name}</div>
+      <div class="meta">${p.alumni || ""}${p.alumni && p.phone ? " · " : ""}${p.phone || ""}</div>
 
       <div class="row" style="gap:8px;margin-top:10px;align-items:flex-end;flex-wrap:wrap">
         <label style="flex:0 1 180px">Bid Amount
           <input id="bidInput" type="number" placeholder="e.g. 900" />
         </label>
         <button id="btn-mark-won" class="btn" disabled>HRB Won</button>
-        <button id="btn-pass" class="btn btn-ghost">Pass / Assign to other club</button>
+        <button id="btn-pass" class="btn btn-ghost">Pass / Assign</button>
       </div>
       <div id="bidWarn" class="hint" style="margin-top:6px;color:#dc2626"></div>
     </div>
   `;
 
-  // Optional advisory (rating/WK/right-hand needs)
-  try { renderAdvice(live, p); } catch {}
+  const bidEl  = $("bidInput");
+  const wonBtn = $("btn-mark-won");
+  const warnEl = $("bidWarn");
 
-  const bidEl  = document.getElementById("bidInput");
-  const wonBtn = document.getElementById("btn-mark-won");
-  const warnEl = document.getElementById("bidWarn");
-
-  // Live guardrail validation
+  // live guardrail validation
   const validateBid = () => {
     const price = Number(bidEl.value);
     if (!Number.isFinite(price) || price < 0) {
-      warnEl.textContent = price === 0 ? "" : "Enter a valid positive amount.";
+      warnEl.textContent = price ? "Enter a valid positive amount." : "";
       wonBtn.disabled = true;
       return false;
     }
     const ok = guardrailOK(price);
     wonBtn.disabled = !ok;
-    warnEl.textContent = ok
-      ? ""
-      : `Guardrail: this bid risks future slots. Keep ≤ ${Math.max(0, (remainingSlots()-1) * (state.minBasePerPlayer || 500))}.`;
+    const floor = Math.max(0, (remainingSlots()-1) * (state.minBasePerPlayer || 500));
+    warnEl.textContent = ok ? "" : `Guardrail: risky bid. Keep ≥ ${floor} for remaining slots.`;
     return ok;
   };
   bidEl.addEventListener("input", validateBid);
   validateBid();
 
-  // HRB Won (only fires if guardrail is OK)
   wonBtn.addEventListener("click", () => {
-    const price = bidEl.value;
-    if (!validateBid()) return; // block if invalid
-    markWon(p.id, price);
+    if (!validateBid()) return;
+    markWon(p.id, Number(bidEl.value));
   });
 
-  // Pass / Assign
-  document.getElementById("btn-pass")?.addEventListener("click", () => {
-    const passPanel = document.getElementById("passPanel");
+  $("btn-pass")?.addEventListener("click", () => {
+    const passPanel = $("passPanel");
     if (passPanel) {
       passPanel.style.display = "block";
       passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+      wirePassPanelForPlayer(p);
     }
-    if (typeof wirePassPanelForPlayer === "function") wirePassPanelForPlayer(p);
   });
 }
-async function wirePassPanelForPlayer(p) {
-  const passPanel = $("passPanel");
+
+function render() {
+  renderPlayersList();
+  renderOtherClubsPanel();
+  renderLiveBid();
+  renderSelectedSquad();
+}
+
+/* ===========================
+   Pass / Assign Panel
+=========================== */
+function wirePassPanelForPlayer(p) {
   const passClubInput = $("passClubInput");
+  const datalist = $("clubNames");
+  const passClubSelect = $("passClubSelect"); // optional (not in your HTML by default)
   const passBidAmount = $("passBidAmount");
   const passPanelMsg = $("passPanelMsg");
-  const datalist = $("clubNames");
-  const assignBtn = $("btn-assign-to-club");
-
-  if (!passPanel || !passClubInput || !passBidAmount || !datalist || !assignBtn) return;
-
-  try {
-    if ((!state.clubs || !state.clubs.length) && sb) {
-      state.clubs = await fetchClubs();
-      persist();
-    }
-  } catch (e) { console.warn("fetchClubs failed:", e); }
 
   const others = getOtherClubs();
-
-  passPanel.style.display = "";
-  passBidAmount.value = p.base != null ? String(p.base) : "";
-  passPanelMsg.textContent = "";
-
+  if (!datalist) return;
   datalist.innerHTML = others.map(c => `<option value="${c.name}"></option>`).join("");
 
-  // rebind Assign cleanly
-  assignBtn.replaceWith(assignBtn.cloneNode(true));
-  const freshAssign = $("btn-assign-to-club");
-  freshAssign.addEventListener("click", async () => {
-    passPanelMsg.textContent = "";
-    const typed = (passClubInput.value || "").trim();
-    if (!typed) { passPanelMsg.textContent = "Type a club name."; return; }
-    const price = passBidAmount.value;
-    await assignToClub(p.id, typed, price);
+  // pre-fill price from bid input if present
+  if (passBidAmount) passBidAmount.value = $("bidInput")?.value || "";
+
+  const assignBtn = $("btn-assign-to-club");
+  if (!assignBtn) return;
+  assignBtn.onclick = null;
+  assignBtn.addEventListener("click", () => {
+    if (passPanelMsg) passPanelMsg.textContent = "";
+    const typed = (passClubInput?.value || "").trim() || (passClubSelect?.value || "");
+    const price = passBidAmount?.value || "";
+    assignToClubByNameOrSlug(p.id, typed, price);
   });
 }
 
-// ===========================
-/* CSV Import (URL + Paste) */
-// ===========================
+/* ===========================
+   CSV Import / Export
+=========================== */
 function wireCsvImportUI() {
-  const urlEl   = $("csvUrl");
+  const urlEl = $("csvUrl");
   const pasteEl = $("csvPaste");
-  const btnFetch      = $("btn-fetch");
-  const btnImport     = $("btn-import");
-  const btnClearUrl   = $("btn-clear-url");
+  const btnFetch = $("btn-fetch");
+  const btnImport = $("btn-import");
+  const btnClearUrl = $("btn-clear-url");
   const btnClearPaste = $("btn-clear-paste");
-  const setMsg = (t) => {
-    // optional <div id="importMsg">; if missing, use console
-    const m = $("importMsg");
-    if (m) m.textContent = t;
-    else if (t) console.log("[Import]", t);
-  };
+  const msgEl = $("importMsg"); // optional
+
+  const setMsg = (t) => { if (msgEl) msgEl.textContent = t; };
 
   if (btnFetch && urlEl) {
     btnFetch.onclick = null;
     btnFetch.addEventListener("click", async () => {
       try {
         setMsg("");
-        const rawUrl = (urlEl.value || "").trim();
-        if (!rawUrl) { setMsg("Enter a Google Sheet URL"); return; }
-        const url = normalizeGsheetsCsvUrl(rawUrl);
+        const url = (urlEl.value || "").trim();
+        if (!url) { setMsg("Enter a Google Sheet CSV URL"); return; }
         const resp = await fetch(url, { cache: "no-store" });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const text = await resp.text();
@@ -670,7 +506,7 @@ function wireCsvImportUI() {
         setMsg("Fetched CSV — click Import to load players.");
       } catch (e) {
         console.error("Fetch CSV failed:", e);
-        setMsg("Fetch failed. If the sheet is private, publish to web (CSV) or paste the CSV.");
+        setMsg("Fetch failed. Ensure the sheet is 'Published to the web' and URL ends with output=csv.");
       }
     });
   }
@@ -680,207 +516,69 @@ function wireCsvImportUI() {
     btnImport.addEventListener("click", () => {
       try {
         setMsg("");
-        const raw = (pasteEl.value || "").trim();
-        if (!raw) { setMsg("Paste CSV data first or use Fetch CSV."); return; }
+        const raw = pasteEl.value || "";
+        if (!raw.trim()) { setMsg("Paste CSV first or use Fetch CSV."); return; }
 
-        const players = parseCSVPlayers(raw);
-        if (!players.length) { setMsg("No players detected. Check header row or paste raw lines."); return; }
+        let players = parseCSVPlayers(raw);
+
+        // Fallback if no headers found (treat as simple list: name[,alumni][,phone])
+        if (!players.length) {
+          const rows = splitCsv(raw);
+          players = rows
+            .map((r, i) => {
+              const name = String(r[0] || "").trim();
+              if (!name) return null;
+              const alumni = String(r[1] || "").trim();
+              const phone  = String(r[2] || "").trim();
+              return { id:String(i+1), name, alumni, phone, status:"new" };
+            })
+            .filter(Boolean);
+        }
 
         state.players = players;
-        // keep configured totals if already set; otherwise default
-        state.playersNeeded    = state.playersNeeded || 15;
-        state.totalPoints      = state.totalPoints   || 15000;
-        state.minBasePerPlayer = state.minBasePerPlayer || 500;
-        state.activeId = null;
-        persist();
+        // Keep queue optional
+        state.queue = players.map(p => p.id);
 
+        // Ensure defaults
+        state.playersNeeded = state.playersNeeded || 15;
+        state.totalPoints = state.totalPoints || 15000;
+        state.minBasePerPlayer = state.minBasePerPlayer || 500;
+
+        persist();
         render();
         setMsg(`Imported ${players.length} players.`);
         $("playersList")?.scrollIntoView({ behavior:"smooth", block:"start" });
       } catch (e) {
         console.error("Import failed:", e);
-        setMsg("Import failed. See console for details.");
+        setMsg("Import failed. Check console for details.");
       }
     });
   }
 
   if (btnClearUrl && urlEl) {
     btnClearUrl.onclick = null;
-    btnClearUrl.addEventListener("click", () => { urlEl.value = ""; setMsg(""); });
+    btnClearUrl.addEventListener("click", () => { urlEl.value = ""; if (msgEl) msgEl.textContent=""; });
   }
   if (btnClearPaste && pasteEl) {
     btnClearPaste.onclick = null;
-    btnClearPaste.addEventListener("click", () => { pasteEl.value = ""; setMsg(""); });
+    btnClearPaste.addEventListener("click", () => { pasteEl.value = ""; if (msgEl) msgEl.textContent=""; });
   }
 }
 
-// ===========================
-// Start-a-bid typeahead
-// ===========================
-function wireStartBidUI() {
-  const input   = $("startName");
-  const results = $("startResults");
-  const btnSet  = $("btn-start-bid");
-  if (!input || !results || !btnSet) return;
-
-  let highlight = -1, currentList = [];
-
-  function closeMenu(){ results.style.display = "none"; results.innerHTML = ""; highlight = -1; currentList = []; }
-  function showMenu(html){ results.innerHTML = html; results.style.display = "block"; }
-
-  function filterPlayers(q) {
-    const s = q.trim().toLowerCase();
-    if (s.length < 2) return [];
-    const remain = (state.players || []).filter(p => p.status === "new"); // only remaining
-    const scored = remain.map(p => {
-      const combo = `${p.name} ${p.alumni || ""}`.toLowerCase();
-      let score = -1;
-      if (combo.startsWith(s)) score = 2;
-      else if (combo.includes(s)) score = 1;
-      return { p, score };
-    }).filter(x => x.score >= 0);
-    scored.sort((a,b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      const ra = (a.p.rating ?? -1), rb = (b.p.rating ?? -1);
-      if (rb !== ra) return rb - ra;
-      return a.p.name.localeCompare(b.p.name);
-    });
-    return scored.slice(0, 12).map(x => x.p);
-  }
-
-  function renderMenu(list){
-    if (!list.length) { closeMenu(); return; }
-    const html = list.map((p, i) => `
-      <div class="ta-item" data-i="${i}" style="padding:6px 8px;cursor:pointer">
-        <div><b>${p.name}</b></div>
-        <div class="meta">${p.alumni ? p.alumni : ""}</div>
-      </div>
-    `).join("");
-    showMenu(html);
-    Array.from(results.querySelectorAll(".ta-item")).forEach(el=>{
-      el.addEventListener("mouseenter", ()=>{ highlight = Number(el.dataset.i); });
-      el.addEventListener("mouseleave", ()=>{ highlight = -1; });
-      el.addEventListener("click", ()=> choose(Number(el.dataset.i)));
-    });
-  }
-
-  function choose(idx){
-    const p = currentList[idx];
-    if (!p) return;
-    input.value = `${p.name}`;     // show only name
-    setActivePlayer(p.id);         // set active player
-    closeMenu();
-  }
-
-  input.addEventListener("input", () => { currentList = filterPlayers(input.value || ""); renderMenu(currentList); });
-
-  input.addEventListener("keydown", (e) => {
-    if (results.style.display !== "block") return;
-    if (e.key === "ArrowDown") { e.preventDefault(); highlight = Math.min(currentList.length-1, highlight+1); }
-    if (e.key === "ArrowUp")   { e.preventDefault(); highlight = Math.max(0, highlight-1); }
-    if (e.key === "Enter")     { e.preventDefault(); choose(highlight >= 0 ? highlight : 0); }
-  });
-
-  document.addEventListener("click", (e)=>{ if (!results.contains(e.target) && e.target !== input) closeMenu(); });
-
-  btnSet.onclick = () => {
-    const list = filterPlayers(input.value || "");
-    if (list.length) { setActivePlayer(list[0].id); closeMenu(); }
-  };
-}
-
-// ===========================
-// Create Club UI wiring
-// ===========================
-function wireCreateClubUI() {
-  const btn = $("btnCreateClub");
-  const nameEl = $("clubName");
-  const logoEl = $("clubLogo");
-  const budgetEl = $("clubBudget");
-  const msgEl = $("clubCreateMsg");
-  if (!btn || !nameEl || !budgetEl) return;
-
-  btn.onclick = null;
-  btn.addEventListener("click", async () => {
-    msgEl.textContent = "";
-    const name = (nameEl.value || "").trim();
-    const logo = (logoEl?.value || "").trim();
-    const budget = (budgetEl.value || "").trim();
-    if (!name) { msgEl.textContent = "Enter a club name."; return; }
-
-    try {
-      await addClubAndRefresh({ name, logo_url: logo, starting_budget: budget });
-      nameEl.value = ""; if (logoEl) logoEl.value = ""; budgetEl.value = "";
-      msgEl.textContent = "Club created.";
-      renderOtherClubsPanel();
-    } catch (e) {
-      console.error("create club failed:", e);
-      msgEl.textContent = "Error: " + (e?.message || e);
-    }
-  });
-}
-
-// ===========================
-// Top-level render + boot
-// ===========================
-function render() {
-  renderPlayersList();
-  renderOtherClubsPanel();
-  renderLiveBid();
-  renderSelectedSquad();   // ← add this line
-}
-
-// --- REPLACE your renderSelectedSquad with this version ---
-function renderSelectedSquad() {
-  const root = document.getElementById("selectedList");
-  if (!root) return;
-
-  const stats = clubStats(state.myClubSlug);
-  const players = stats.players;
-
-  const header = `
-    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
-      <div class="meta">Players: <b>${stats.count}</b></div>
-    </div>
-  `;
-
-  if (!players.length) {
-    root.innerHTML = header + `<div class="hint">No players won yet.</div>`;
-    return;
-  }
-
-  const list = players.map(p => `
-    <div class="card" style="padding:8px;margin-bottom:6px">
-      <div><b>${p.name || "-"}</b></div>
-      <div class="meta">${p.alumni || ""}${p.alumni && p.phone ? " · " : ""}${p.phone || ""}</div>
-    </div>
-  }).join("");
-
-  root.innerHTML = header + list;
-}
-// --- ADD/REPLACE: make a flat CSV of all won players for coordination ---
 function exportWonCSV() {
   const won = (state.players || []).filter(p => p.status === "won");
-  const rows = [
-    ["Club", "Player Name", "Alumni", "Phone"]
-  ];
+  const rows = [["Club","Player Name","Alumni","Phone"]];
   won.forEach(p => {
     const club = (state.clubs || []).find(c => c.slug === p.owner);
-    rows.push([
-      club ? club.name : (p.owner || ""),
-      p.name || "",
-      p.alumni || "",
-      p.phone || ""
-    ]);
+    rows.push([ club ? club.name : (p.owner || ""), p.name || "", p.alumni || "", p.phone || "" ]);
   });
-
   const csv = rows.map(r => r.map(v => {
     const s = String(v ?? "");
-    return (/[",\n]/.test(s)) ? `"${s.replace(/"/g, '""')}"` : s;
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
   }).join(",")).join("\n");
 
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url  = URL.createObjectURL(blob);
+  const blob = new Blob([csv], { type:"text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = "auction-won-contacts.csv";
@@ -890,28 +588,119 @@ function exportWonCSV() {
   a.remove();
 }
 
-// --- Ensure the Export button calls it (do this in boot() or once on DOM ready) ---
 function wireExportButton() {
-  const btn = document.getElementById("btn-export");
+  const btn = $("btn-export");
   if (!btn) return;
   btn.onclick = null;
   btn.addEventListener("click", exportWonCSV);
 }
 
+/* ===========================
+   Create Club UI
+=========================== */
+function wireCreateClubUI() {
+  const nameEl = $("clubName");
+  const logoEl = $("clubLogo");
+  const budEl  = $("clubBudget");
+  const btn = $("btnCreateClub");
+  const msg = $("clubCreateMsg");
 
+  if (!btn) return;
+  btn.onclick = null;
+  btn.addEventListener("click", async () => {
+    try {
+      if (msg) msg.textContent = "";
+      const name = (nameEl?.value || "").trim();
+      const logo = (logoEl?.value || "").trim();
+      const start = toNum(budEl?.value, state.totalPoints || 15000);
+      if (!name) throw new Error("Enter club name");
+
+      await addClubLocal({ name, logo_url: logo, starting_budget: start });
+      if (sb) { try { await createClubDB({ slug: slugify(name), name, logo_url: logo, starting_budget: start }); } catch(e) { console.warn("Supabase create club failed:", e); } }
+      if (msg) msg.textContent = "Club created.";
+      renderOtherClubsPanel();
+    } catch (e) {
+      if (msg) msg.textContent = e.message || "Create failed.";
+    }
+  });
+}
+
+/* ===========================
+   Start Bid UI: name picker
+=========================== */
+function wireStartBidUI() {
+  const input = $("startName");
+  const menu  = $("startResults");
+  const btn   = $("btn-start-bid");
+  const seed  = $("seedBase");
+
+  if (!input || !menu || !btn) return;
+
+  function filter(q) {
+    q = (q || "").trim().toLowerCase();
+    if (q.length < 2) return [];
+    const cand = (state.players || []).filter(p => p.status !== "won");
+    // match on name or alumni
+    return cand.filter(p =>
+      (p.name || "").toLowerCase().includes(q) ||
+      (p.alumni || "").toLowerCase().includes(q)
+    ).slice(0, 10);
+  }
+
+  input.addEventListener("input", () => {
+    const q = input.value;
+    const list = filter(q);
+    if (!list.length) {
+      menu.style.display = "none";
+      menu.innerHTML = "";
+      return;
+    }
+    menu.style.display = "block";
+    menu.innerHTML = list.map(p => `
+      <div class="ta-item" data-id="${p.id}">${p.name}${p.alumni ? " · " + p.alumni : ""}</div>
+    `).join("");
+
+    $$(".ta-item", menu).forEach(el => {
+      el.addEventListener("click", () => {
+        const id = el.getAttribute("data-id");
+        setActivePlayer(id);
+        menu.style.display = "none";
+        // prefill base if CSV has it; otherwise leave as blank for manual entry
+        if (seed) {
+          const player = state.players.find(x => x.id === id);
+          seed.value = player && Number.isFinite(player.base) ? player.base : "";
+        }
+      });
+    });
+  });
+
+  btn.addEventListener("click", () => {
+    // allow manual set by typing full/unique name then pressing Set Active
+    const q = (input.value || "").trim().toLowerCase();
+    if (!q) return;
+    const cand = (state.players || []).filter(p => p.status !== "won");
+    const exact = cand.find(p =>
+      (p.name || "").toLowerCase() === q ||
+      ((p.name || "").toLowerCase() + " " + (p.alumni || "").toLowerCase()) === q
+    ) || cand.find(p => (p.name || "").toLowerCase().startsWith(q));
+    if (exact) {
+      setActivePlayer(exact.id);
+      if (seed) seed.value = Number.isFinite(exact.base) ? exact.base : "";
+    }
+  });
+}
+
+/* ===========================
+   Boot
+=========================== */
 async function boot() {
   load();
   await ensureMyClubSeeded();
   wireCreateClubUI();
   wireCsvImportUI();
   wireStartBidUI();
-  wireExportButton();      // ← add this
+  wireExportButton();
   render();
 }
 
-
-// Expose for safe calling from index.html (if needed)
-window.boot = window.boot || boot;
-window.render = window.render || render;
-
-document.addEventListener("DOMContentLoaded", () => { boot(); });
+document.addEventListener("DOMContentLoaded", boot);
