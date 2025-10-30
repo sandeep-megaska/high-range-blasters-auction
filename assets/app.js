@@ -547,6 +547,8 @@ function render(){
   renderPlayersList();
   renderLiveBid();
   renderSelectedList();
+    renderOtherClubsPanel();
+
 }
 
 function renderCompliance(){
