@@ -300,6 +300,107 @@ async function warmloadSupabase(){
   } catch {}
 }
 function persist(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+// ---------- Clubs helpers ----------
+function slugify(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "")
+    .slice(0, 60);
+}
+
+function ensureMyClubSeeded() {
+  // Use current Overall Points as HRB budget by default
+  const hrbSlug = state.myClubSlug;
+  if (!state.clubs) state.clubs = [];
+  const found = state.clubs.find(c => c.slug === hrbSlug);
+  if (!found) {
+    state.clubs.push({
+      slug: hrbSlug,
+      name: "High Range Blasters",
+      logo: "/assets/highrange.svg",
+      startingBudget: state.totalPoints || 15000
+    });
+  } else if (!found.startingBudget && state.totalPoints) {
+    found.startingBudget = state.totalPoints;
+  }
+}
+
+function addClub({ name, logo, startingBudget }) {
+  const slug = slugify(name);
+  if (!slug) throw new Error("Club name required.");
+  if (state.clubs.some(c => c.slug === slug)) throw new Error("A club with this name already exists.");
+  state.clubs.push({
+    slug, name: name.trim(), logo: (logo || "").trim() || null,
+    startingBudget: Math.max(0, Number(startingBudget) || 0)
+  });
+  persist();
+}
+
+function clubStats(slug) {
+  const club = state.clubs.find(c => c.slug === slug);
+  if (!club) return { club: null, count: 0, spend: 0, budgetLeft: 0, players: [] };
+  const players = (state.players || []).filter(p => p.status === "won" && p.owner === slug);
+  const spend = players.reduce((s, p) => s + (Number(p.finalBid) || 0), 0);
+  const budgetLeft = Math.max(0, (Number(club.startingBudget) || 0) - spend);
+  return { club, count: players.length, spend, budgetLeft, players };
+}
+
+function renderOtherClubsPanel() {
+  const root = document.getElementById("otherClubsPanel");
+  if (!root) return;
+  const others = (state.clubs || []).filter(c => c.slug !== state.myClubSlug);
+
+  const blocks = others.map(c => {
+    const stats = clubStats(c.slug);
+    const list = stats.players.length
+      ? stats.players.map(p => `
+          <div class="item" style="padding:6px 0;border-bottom:1px solid #f3f4f6">
+            <div class="title"><b>${p.name}</b></div>
+            <div class="meta">#${p.rank} · Cat ${p.category} · ${p.role || ""}</div>
+            <div class="meta">Bid: <b>${p.finalBid ?? "-"}</b></div>
+          </div>
+        `).join("")
+      : `<div class="hint">No players yet.</div>`;
+
+    return `
+      <div class="card" style="padding:12px">
+        <div class="row">
+          ${c.logo ? `<img src="${c.logo}" alt="${c.name}" class="brand-logo" style="width:36px;height:36px;border-radius:999px;object-fit:cover;margin-right:8px;" />` : `<div style="width:36px;height:36px;border-radius:999px;background:#e5e7eb;margin-right:8px;"></div>`}
+          <div>
+            <div class="title"><b>${c.name}</b></div>
+            <div class="meta">Players: ${stats.count} • Spend: ${stats.spend} • Budget left: ${stats.budgetLeft}</div>
+          </div>
+        </div>
+        <div style="margin-top:10px; max-height:220px; overflow:auto;">${list}</div>
+      </div>
+    `;
+  }).join("");
+
+  root.innerHTML = blocks || `<div class="hint">Add clubs to see their squads.</div>`;
+}
+
+// wire the small "Add Club" card in index.html
+(function wireAddClubUI(){
+  const btn = document.getElementById("btn-create-club");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    const name = (document.getElementById("club-name")?.value || "").trim();
+    const logo = (document.getElementById("club-logo")?.value || "").trim();
+    const budget = (document.getElementById("club-budget")?.value || "").trim();
+    const msg = document.getElementById("club-create-msg");
+    try {
+      addClub({ name, logo, startingBudget: budget });
+      if (msg) msg.textContent = "Club created.";
+      if (document.getElementById("club-name")) document.getElementById("club-name").value = "";
+      if (document.getElementById("club-logo")) document.getElementById("club-logo").value = "";
+      if (document.getElementById("club-budget")) document.getElementById("club-budget").value = "";
+      renderOtherClubsPanel();
+    } catch (e) {
+      if (msg) msg.textContent = "Error: " + (e?.message || e);
+    }
+  });
+})();
 
 // -------- Derived ----------
 function remainingSlots(){ return Math.max(0, state.playersNeeded - state.players.filter(p=>p.status==="won").length); }
