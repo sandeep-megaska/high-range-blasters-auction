@@ -979,3 +979,39 @@ function renderSelectedList(){
     </div>`;
   }).join("");
 }
+function wireCreateClubUI() {
+  const btn = document.getElementById("btnCreateClub");
+  const nameEl = document.getElementById("clubName");
+  const logoEl = document.getElementById("clubLogo");
+  const budgetEl = document.getElementById("clubBudget");
+  const msgEl = document.getElementById("clubCreateMsg");
+
+  if (!btn || !nameEl || !budgetEl) return;
+
+  // Remove any previous handler to avoid duplicates
+  btn.onclick = null;
+  btn.addEventListener("click", async () => {
+    msgEl.textContent = "";
+    const name = (nameEl.value || "").trim();
+    const logo = (logoEl?.value || "").trim();
+    const budget = (budgetEl.value || "").trim();
+
+    if (!name) { msgEl.textContent = "Enter a club name."; return; }
+
+    try {
+      await addClubAndRefresh({ name, logo_url: logo, starting_budget: budget });
+      // clear inputs
+      nameEl.value = ""; logoEl.value = ""; budgetEl.value = "";
+      msgEl.textContent = "Club created.";
+      renderOtherClubsPanel();
+    } catch (e) {
+      console.error("create club failed:", e);
+      msgEl.textContent = "Error: " + (e?.message || e);
+    }
+  });
+}
+
+// Call this once after the DOM is ready & sections are rendered
+document.addEventListener("DOMContentLoaded", () => {
+  try { wireCreateClubUI(); } catch {}
+});
