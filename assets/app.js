@@ -793,6 +793,7 @@ function renderLiveBid(){
       </div>
     </div>
   `;
+   await wirePassPanelForPlayer(p);
 // Show pass panel for assignment
 async function wirePassPanelForPlayer(p) {
   const passPanel = document.getElementById("passPanel");
@@ -918,7 +919,7 @@ async function wirePassPanelForPlayer(p) {
   if (passPanel) passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
     
 });
-  await wirePassPanelForPlayer(p);
+ 
 }
 
 function renderSelectedList(){
