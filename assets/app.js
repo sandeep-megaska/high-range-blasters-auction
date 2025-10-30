@@ -1,4 +1,5 @@
 // assets/app.js — Tournament edition (typeahead + ranks + category bases)
+import { sb, fetchClubs, createClubDB, updateClubDB, deleteClubDB, adjustBudgetDB, onClubsRealtime, loadConstraintsFromSupabase, loadSettingsFromSupabase } from "./supabaseClient.js";
 
 import {
   STORAGE_KEY,
@@ -130,7 +131,22 @@ $("#btn-reset")?.addEventListener("click", () => { localStorage.removeItem(STORA
 // -------- Init ----------
 load();
 routeViews();
-if (state.auth.loggedIn && state.setup.done) { render(); warmloadSupabase(); }
+
+(async () => {
+  if (state.auth.loggedIn && state.setup.done) {
+    await ensureMyClubSeeded(); // pulls DB, seeds HRB if missing
+    render();
+    warmloadSupabase(); // your existing optional loader
+
+    // Realtime: refresh clubs on any DB change
+    onClubsRealtime(async () => {
+      try {
+        state.clubs = await fetchClubs();
+        render();
+      } catch {}
+    });
+  }
+})();
 
 // -------- Routing ----------
 function routeViews(){
@@ -311,33 +327,63 @@ function slugify(name) {
     .slice(0, 60);
 }
 
-function ensureMyClubSeeded() {
-  // Use current Overall Points as HRB budget by default
+async function ensureMyClubSeeded() {
+  // Pull clubs from DB first
+  try {
+    const dbClubs = await fetchClubs();
+    state.clubs = dbClubs;
+  } catch (e) {
+    console.warn("fetchClubs failed (offline?):", e);
+    state.clubs = state.clubs || [];
+  }
+
+  // Ensure HRB exists
   const hrbSlug = state.myClubSlug;
-  if (!state.clubs) state.clubs = [];
   const found = state.clubs.find(c => c.slug === hrbSlug);
   if (!found) {
-    state.clubs.push({
-      slug: hrbSlug,
-      name: "High Range Blasters",
-      logo: "/assets/highrange.svg",
-      startingBudget: state.totalPoints || 15000
-    });
-  } else if (!found.startingBudget && state.totalPoints) {
-    found.startingBudget = state.totalPoints;
+    const start = state.totalPoints || 15000;
+    const hrb = { slug: hrbSlug, name: "High Range Blasters", logo_url: "/assets/highrange.svg", starting_budget: start };
+    try {
+      await createClubDB(hrb);
+      state.clubs = await fetchClubs();
+    } catch (e) {
+      // fallback to local mirror if DB not available
+      state.clubs.push({ id: "local-hrb", slug: hrbSlug, name: "High Range Blasters", logo_url: "/assets/highrange.svg", starting_budget: start, budget_left: start });
+    }
   }
-}
-
-function addClub({ name, logo, startingBudget }) {
-  const slug = slugify(name);
-  if (!slug) throw new Error("Club name required.");
-  if (state.clubs.some(c => c.slug === slug)) throw new Error("A club with this name already exists.");
-  state.clubs.push({
-    slug, name: name.trim(), logo: (logo || "").trim() || null,
-    startingBudget: Math.max(0, Number(startingBudget) || 0)
-  });
   persist();
 }
+async function addClub({ name, logo, startingBudget }) {
+  const slug = slugify(name);
+  if (!slug) throw new Error("Club name required.");
+
+  await createClubDB({
+    slug,
+    name: name.trim(),
+    logo_url: (logo || "").trim() || null,
+    starting_budget: Math.max(0, Number(startingBudget) || 0)
+  });
+  state.clubs = await fetchClubs();
+  persist();
+}
+
+async function editClub({ id, name, logo, startingBudget }) {
+  await updateClubDB({
+    id,
+    name: name?.trim(),
+    logo_url: (logo || "").trim(),
+    starting_budget: startingBudget != null ? Math.max(0, Number(startingBudget) || 0) : undefined
+  });
+  state.clubs = await fetchClubs();
+  persist();
+}
+
+async function removeClub(id) {
+  await deleteClubDB(id);
+  state.clubs = await fetchClubs();
+  persist();
+}
+
 
 function clubStats(slug) {
   const club = state.clubs.find(c => c.slug === slug);
@@ -423,10 +469,28 @@ function nextPlayer(){
   if (!state.queue.length){ randomizeQueue(); return; }
   const [head,...rest] = state.queue; state.queue=rest; state.activeId=head; persist(); render();
 }
-function markWon(id,bid){
-  state.players = state.players.map(p=>p.id===id?{...p,status:"won",finalBid:bid}:p);
-  state.log.push({type:"won",id,bid}); state.activeId=null; persist(); render();
+async function markWon(id, bid) {
+  const winningBid = Math.max(0, Number(bid) || 0);
+
+  // Update local player
+  state.players = state.players.map(p => p.id === id ? { ...p, status: "won", owner: state.myClubSlug, finalBid: winningBid } : p);
+  state.log.push({ type: "won", id, bid: winningBid });
+  state.activeId = null;
+  persist();
+
+  // Adjust HRB budget in DB (best-effort)
+  try {
+    const hrb = (state.clubs || []).find(c => c.slug === state.myClubSlug);
+    if (hrb?.id) await adjustBudgetDB({ club_id: hrb.id, delta: -winningBid });
+    // refresh clubs to get updated budget_left
+    state.clubs = await fetchClubs();
+  } catch (e) {
+    console.warn("adjustBudgetDB failed:", e);
+  }
+
+  render();
 }
+
 function markLostToOtherClub(id) {
   const player = state.players.find(p => p.id === id);
   if (!player) return;
@@ -676,6 +740,47 @@ function renderLiveBid(){
       </div>
     </div>
   `;
+// Show pass panel for assignment
+const passPanel = document.getElementById("passPanel");
+const passClubInput = document.getElementById("passClubInput");
+const passBidAmount = document.getElementById("passBidAmount");
+const passPanelMsg = document.getElementById("passPanelMsg");
+const datalist = document.getElementById("clubNames");
+
+if (passPanel && passClubInput && passBidAmount && datalist) {
+  passPanel.style.display = "";
+  passBidAmount.value = String(p.base || 0);
+
+  // Populate datalist with other clubs (exclude HRB)
+  const others = (state.clubs || []).filter(c => c.slug !== state.myClubSlug);
+  datalist.innerHTML = others.map(c => `<option value="${c.name}"></option>`).join("");
+
+  document.getElementById("btn-assign-to-club")?.addEventListener("click", async () => {
+    const clubName = (passClubInput.value || "").trim();
+    const club = others.find(c => c.name.toLowerCase() === clubName.toLowerCase());
+    if (!club) { passPanelMsg.textContent = "Pick a valid club from the list."; return; }
+
+    const winningBid = Math.max(0, Number(passBidAmount.value) || 0);
+
+    // Local update
+    state.players = state.players.map(x => x.id === p.id ? ({ ...x, status: "won", owner: club.slug, finalBid: winningBid }) : x);
+    state.log.push({ type: "lost", id: p.id, owner: club.slug, bid: winningBid });
+    state.activeId = null;
+    persist();
+
+    // DB budget adjust (best-effort)
+    try {
+      if (club.id) await adjustBudgetDB({ club_id: club.id, delta: -winningBid });
+      state.clubs = await fetchClubs();
+    } catch(e) {
+      console.warn("adjustBudgetDB (other club) failed:", e);
+    }
+
+    render();
+  });
+} else {
+  if (passPanel) passPanel.style.display = "none";
+}
 
   const bidInput = document.getElementById("yourBid");
   const warn = document.getElementById("guardWarn");
@@ -693,7 +798,12 @@ function renderLiveBid(){
     if (!guardrailOK(bid)) { alert("Guardrail violated. Reduce bid."); return; }
     markWon(p.id, bid);
   });
-  document.getElementById("btn-pass")?.addEventListener("click", ()=> markLostToOtherClub(p.id));
+  document.getElementById("btn-pass")?.addEventListener("click", () => {
+  // Just ensure the passPanel is visible; assignment happens via its "Assign" button
+  const passPanel = document.getElementById("passPanel");
+  if (passPanel) passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
 
   document.getElementById("btn-skip")?.addEventListener("click", ()=> nextPlayer());
 }
