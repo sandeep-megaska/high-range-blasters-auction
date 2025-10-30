@@ -283,6 +283,9 @@ function load(){
   $("#totalPoints").value = state.totalPoints;
   $("#playersNeeded").value = state.playersNeeded;
   $("#minBasePerPlayer").value = state.minBasePerPlayer;
+    ensureMyClubSeeded();
+  persist();
+
 }
 async function warmloadSupabase(){
   const team = "high-range-blasters";
