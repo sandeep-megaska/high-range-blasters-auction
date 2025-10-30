@@ -87,6 +87,17 @@ function guardrailOK(bid) {
 function supabaseAvailable() {
   return !!(window.ENV?.SUPABASE_URL && window.ENV?.SUPABASE_ANON_KEY && window.supabase?.createClient);
 }
+function goToBid() {
+  const live = document.getElementById("liveBid");
+  if (live) live.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function wireGoToBid() {
+  const btn = document.getElementById("btnGoToBid");
+  if (!btn) return;
+  btn.onclick = null;
+  btn.addEventListener("click", goToBid);
+}
 
 let sb = null;
 if (supabaseAvailable()) {
