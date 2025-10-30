@@ -891,12 +891,13 @@ function exportWonCSV() {
 }
 
 // --- Ensure the Export button calls it (do this in boot() or once on DOM ready) ---
-(function wireExportButton(){
+function wireExportButton() {
   const btn = document.getElementById("btn-export");
   if (!btn) return;
   btn.onclick = null;
   btn.addEventListener("click", exportWonCSV);
-})();
+}
+
 
 async function boot() {
   load();
@@ -904,8 +905,10 @@ async function boot() {
   wireCreateClubUI();
   wireCsvImportUI();
   wireStartBidUI();
+  wireExportButton();      // ← add this
   render();
 }
+
 
 // Expose for safe calling from index.html (if needed)
 window.boot = window.boot || boot;
