@@ -185,22 +185,22 @@ https://docs.google.com/spreadsheets/d/e/2PACX-1vRdYw7KawkwjdjGAg1U9xpLW0f1oA3jb
       </section>
     </main>
 <!-- ADD CLUB (Minimal) -->
-<section class="card">
-  <h2>Add Club (Minimal)</h2>
+<section class="card" id="addClubCard">
+  <h2>Add Club</h2>
   <div class="form-grid">
-    <label> Club name
-      <input id="club-name" placeholder="Coastal Strikers" />
+    <label>Club name
+      <input id="clubName" placeholder="Coastal Strikers" />
     </label>
-    <label> Logo URL (optional)
-      <input id="club-logo" placeholder="https://…" />
+    <label>Logo URL (optional)
+      <input id="clubLogo" placeholder="./assets/logo.svg or https://…" />
     </label>
-    <label> Starting Budget (points)
-      <input id="club-budget" type="number" placeholder="15000" />
+    <label>Starting Budget (points)
+      <input id="clubBudget" type="number" placeholder="15000" />
     </label>
   </div>
   <div class="row" style="margin-top:10px;">
-    <button id="btn-create-club" class="btn">Create Club</button>
-    <div id="club-create-msg" class="hint" style="margin-left:8px;"></div>
+    <button id="btnCreateClub" class="btn">Create Club</button>
+    <div id="clubCreateMsg" class="hint" style="margin-left:8px;"></div>
   </div>
 </section>
 <!-- Pass / Assign to other club UI -->
