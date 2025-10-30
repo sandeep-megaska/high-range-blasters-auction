@@ -275,53 +275,48 @@ async function markWon(id, bid) {
     console.warn("updateBudgetDB(HRB) failed:", e);
   }
   render();
+    afterAssignmentRefresh();
 }
 
 /* ===========================
    Rendering
 =========================== */
+function remainingPlayers() {
+  return (state.players || []).filter(p => p.status !== "won" && p.status !== "lost");
+}
+
 function renderPlayersList() {
-  const root = $("playersList");
-  if (!root) return;
-  const items = (state.players || []).map(p => {
-  const ownerName = p.owner ? ((state.clubs || []).find(c => c.slug === p.owner)?.name || p.owner) : "";
+  const listEl   = document.getElementById("playersList");
+  const countEl  = document.getElementById("playersCount");
+  if (!listEl) return;
 
-  // --- NEW: priority + needs, build safe strings ---
-  const pr = classifyPriority(p.rating);
-  const need = rosterNeeds();
-  const needBitsArr = [];
-  if (p.is_wk && need.wkNeed > 0) needBitsArr.push(`Need WK (${need.wkNeed} left)`);
-  if (isRightHand(p.batting_hand) && need.rhNeed > 0) needBitsArr.push(`Need Right-hand bat (${need.rhNeed} left)`);
-  const needBits = needBitsArr.join(" · ");
+  const remain = remainingPlayers();
 
-  let metaPieces = [];
-  metaPieces.push(priorityBadge(pr));
-  if (p.rating != null) metaPieces.push(`Rating ${p.rating}`);
-  if (p.category)       metaPieces.push(`Cat ${p.category}`);
-  if (p.role)           metaPieces.push(p.role);
-  if (p.base != null)   metaPieces.push(`Seed ${p.base}`);
-  if (needBits)         metaPieces.push(`<span style="color:#065f46">${needBits}</span>`);
-  const metaHTML = metaPieces.join(" · ");
+  // Count label: "90 left" etc.
+  if (countEl) countEl.textContent = `(${remain.length} left)`;
 
-  return `
-    <div class="card" style="padding:10px;margin-bottom:8px">
-      <div class="row" style="justify-content:space-between;gap:8px">
-        <div>
-          <div><b>${p.name || "-"}</b></div>
-          <div class="meta">${metaHTML}</div>
-        </div>
-        <div class="meta">
-          ${p.status === "won"
-            ? `Won by <b>${ownerName}</b>${p.finalBid != null ? ` @ <b>${p.finalBid}</b>` : ""}`
-            : (p.status === "lost" ? `Passed` : ``)}
-        </div>
+  const items = remain.map(p => {
+    const ownerName = p.owner ? ((state.clubs || []).find(c => c.slug === p.owner)?.name || p.owner) : "";
+    // compact meta (no base unless present)
+    const bits = [];
+    if (p.rating != null) bits.push(`Rating ${p.rating}`);
+    if (p.category)       bits.push(`Cat ${p.category}`);
+    if (p.role)           bits.push(p.role);
+    if (p.alumni)         bits.push(p.alumni);
+    const meta = bits.join(" · ");
+
+    return `
+      <div class="card" style="padding:10px;margin-bottom:8px">
+        <div><b>${p.name || "-"}</b></div>
+        <div class="meta">${meta}</div>
+        <!-- No Start Bid button here by design -->
       </div>
-      <div class="row" style="gap:6px;margin-top:8px">
-        <button class="btn" data-action="start" data-id="${p.id}">Start Bid</button>
-      </div>
-    </div>
-  `;
-}).join("");
+    `;
+  }).join("");
+
+  listEl.innerHTML = items || `<div class="hint">No remaining players.</div>`;
+}
+
   root.innerHTML = items || `<div class="hint">Import players to begin.</div>`;
 
   // wire
@@ -434,6 +429,16 @@ async function wirePassPanelForPlayer(p) {
 
     render();
   });
+}
+function clearPicker() {
+  const input = document.getElementById("startName");
+  if (input) input.value = "";
+}
+
+function afterAssignmentRefresh() {
+  persist();
+  render();        // re-renders lists & counts
+  clearPicker();   // ready for next player
 }
 
 async function renderLiveBid(){
@@ -599,11 +604,20 @@ function normalizeHeader(h) {
 //   Batting Hand / Batting_Hand / Hand (optional; "Right Hand Bat", "RHB", "Right")
 //   WK / Wicket Keeper / Is_WK (optional; yes/true/1 = keeper)
 //   Base / Seed / Start Bid (optional; if absent -> base=null)
+// STRICT parser — your CSV is the source of truth.
+// Recognized headers (case/spacing doesn't matter):
+//   Name / Player Name (required)
+//   Rating / Rank / Rating10 / Grade (stored as .rating for priority)
+//   Alumni / College / Institute (optional; shown in type-ahead)
+//   Role / Playing Role / Type (optional)
+//   Batting Hand / Batting_Hand / Hand (optional; "Right", "RHB")
+//   WK / Wicket Keeper / Is_WK (optional; yes/true/1)
+//   Base / Seed / Start Bid (optional; if absent -> base=null)
+//   Category / Cat (optional)
 function parseCSVPlayers(raw) {
   const rows = splitCsv(raw).filter(r => r.some(c => String(c).trim() !== ""));
   if (!rows.length) return [];
 
-  // pick header row
   const headerRowIdx = rows.findIndex(r => {
     const h = r.map(normalizeHeader);
     return h.includes("name") || h.includes("player name") || h.includes("player");
@@ -623,6 +637,7 @@ function parseCSVPlayers(raw) {
 
   const iName   = idx("name","player name","player");
   const iRate   = idx("rating","rank","rating10","grade");
+  const iAlmn   = idx("alumni","college","institute");
   const iRole   = idx("role","playing role","type");
   const iHand   = idx("batting hand","batting_hand","hand");
   const iWK     = idx("wk","wicket keeper","is_wk","keeper");
@@ -637,29 +652,32 @@ function parseCSVPlayers(raw) {
     if (!name) return;
 
     const ratingRaw = iRate >= 0 ? String(cols[iRate]).trim() : "";
-    const rating = ratingRaw === "" ? null : Number(ratingRaw); // use your value as-is
+    const rating = ratingRaw === "" ? null : Number(ratingRaw);
 
-    const role   = iRole >= 0 ? String(cols[iRole]).trim() : "";
-    const hand   = iHand >= 0 ? String(cols[iHand]).trim() : "";
-    const isWK   = iWK  >= 0 ? yes(cols[iWK]) : /wk|keeper/i.test(role); // fallback: role contains WK
-    const base   = iBase >= 0 && String(cols[iBase]).trim() !== "" ? Number(cols[iBase]) : null;
-    const cat    = iCat  >= 0 ? String(cols[iCat]).trim() : "";
+    const alumni = iAlmn >= 0 ? String(cols[iAlmn]).trim() : "";
+    const role   = iRole >= 0 ? String(cols[iRole]).trim()   : "";
+    const hand   = iHand >= 0 ? String(cols[iHand]).trim()   : "";
+    const isWK   = iWK  >= 0 ? yes(cols[iWK]) : /wk|keeper/i.test(role);
+    const base   = (iBase >= 0 && String(cols[iBase]).trim() !== "") ? Number(cols[iBase]) : null;
+    const cat    = iCat >= 0 ? String(cols[iCat]).trim() : "";
 
     players.push({
       id: String(players.length + 1),
       name,
-      rating,               // used for priority
+      rating,               // priority badge uses this
+      alumni,               // shown in picker
       role,
       batting_hand: hand,
       is_wk: !!isWK,
-      base,                 // shown only if present
+      base,                 // will be ignored/displayed only if present
       category: cat,
-      status: "new"
+      status: "new"         // new | won | lost
     });
   });
 
   return players;
 }
+
 
 /* ===========================
    CSV Import (URL + Paste)
@@ -743,12 +761,10 @@ if (btnFetch && urlEl) {
 function wireStartBidUI() {
   const input   = document.getElementById("startName");
   const results = document.getElementById("startResults");
-  const seedEl  = document.getElementById("seedBase");
   const btnSet  = document.getElementById("btn-start-bid");
   if (!input || !results || !btnSet) return;
 
-  let highlight = -1;   // highlighted index in the menu
-  let currentList = []; // current filtered players
+  let highlight = -1, currentList = [];
 
   function closeMenu(){ results.style.display = "none"; results.innerHTML = ""; highlight = -1; currentList = []; }
   function showMenu(html){ results.innerHTML = html; results.style.display = "block"; }
@@ -756,17 +772,22 @@ function wireStartBidUI() {
   function filterPlayers(q) {
     const s = q.trim().toLowerCase();
     if (s.length < 2) return [];
-    const arr = (state.players || []).filter(p => !!p.name);
-    // simple score: startsWith > substring
-    const scored = arr.map(p => {
-      const n = p.name.toLowerCase();
+    const remain = (state.players || []).filter(p => p.status === "new"); // only remaining
+    const scored = remain.map(p => {
+      const combo = `${p.name} ${p.alumni || ""}`.toLowerCase();
       let score = -1;
-      if (n.startsWith(s)) score = 2;
-      else if (n.includes(s)) score = 1;
+      if (combo.startsWith(s)) score = 2;
+      else if (combo.includes(s)) score = 1;
       return { p, score };
     }).filter(x => x.score >= 0);
-    scored.sort((a,b) => b.score - a.score || a.p.name.localeCompare(b.p.name));
-    return scored.slice(0, 10).map(x => x.p);
+    scored.sort((a,b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      // secondary by rating desc if available
+      const ra = (a.p.rating ?? -1), rb = (b.p.rating ?? -1);
+      if (rb !== ra) return rb - ra;
+      return a.p.name.localeCompare(b.p.name);
+    });
+    return scored.slice(0, 12).map(x => x.p);
   }
 
   function renderMenu(list){
@@ -774,7 +795,7 @@ function wireStartBidUI() {
     const html = list.map((p, i) => `
       <div class="ta-item" data-i="${i}" style="padding:6px 8px;cursor:pointer">
         <div><b>${p.name}</b></div>
-        <div class="meta">Cat ${p.category || "-"} · Base ${p.base ?? "-" } · ${p.role || ""}</div>
+        <div class="meta">${p.alumni ? p.alumni : ""}</div>
       </div>
     `).join("");
     showMenu(html);
@@ -788,12 +809,24 @@ function wireStartBidUI() {
   function choose(idx){
     const p = currentList[idx];
     if (!p) return;
-    input.value = p.name;                         // fill full name
-    if (seedEl) seedEl.value = p.base ?? "";
-    setActivePlayer(p.id);
+    input.value = `${p.name}`;        // only name in input
+    setActivePlayer(p.id);            // seed/base is NOT touched
     closeMenu();
   }
 
+  input.addEventListener("input", () => { currentList = filterPlayers(input.value || ""); renderMenu(currentList); });
+  input.addEventListener("keydown", (e) => {
+    if (results.style.display !== "block") return;
+    if (e.key === "ArrowDown") { e.preventDefault(); highlight = Math.min(currentList.length-1, highlight+1); }
+    if (e.key === "ArrowUp")   { e.preventDefault(); highlight = Math.max(0, highlight-1); }
+    if (e.key === "Enter")     { e.preventDefault(); choose(highlight >= 0 ? highlight : 0); }
+  });
+  document.addEventListener("click", (e)=>{ if (!results.contains(e.target) && e.target !== input) closeMenu(); });
+  btnSet.onclick = () => {
+    const list = filterPlayers(input.value || "");
+    if (list.length) { setActivePlayer(list[0].id); closeMenu(); }
+  };
+}
   input.addEventListener("input", () => {
     const q = input.value || "";
     currentList = filterPlayers(q);
