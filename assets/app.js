@@ -36,6 +36,19 @@ function load() {
 /* ===========================
    Utilities
 =========================== */
+// Minimal player line used in HRB + Other Clubs lists
+function miniRow(p) {
+  const alumni = p.alumni || "";
+  const phone  = p.phone  || "";
+  const sep    = (alumni && phone) ? " · " : "";
+  return `
+    <div class="mini-row">
+      <div class="mini-name"><b>${p.name || "-"}</b></div>
+      <div class="mini-sub">${alumni}${sep}${phone}</div>
+    </div>
+  `;
+}
+
 const $  = (id) => document.getElementById(id);
 const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 
@@ -327,12 +340,12 @@ function renderPlayersList() {
 }
 
 function renderSelectedSquad() {
-  const root = $("selectedList");
+  const root = document.getElementById("selectedList");
   if (!root) return;
 
   const stats = clubStats(state.myClubSlug);
   const header = `
-    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:6px">
       <div class="meta">Players: <b>${stats.count}</b></div>
     </div>
   `;
@@ -342,42 +355,40 @@ function renderSelectedSquad() {
     return;
   }
 
-  const list = stats.players.map(p => `
-    <div class="card" style="padding:8px;margin-bottom:6px">
-      <div><b>${p.name || "-"}</b></div>
-      <div class="meta">${p.alumni || ""}${p.alumni && p.phone ? " · " : ""}${p.phone || ""}</div>
-    </div>
-  `).join("");
-
-  root.innerHTML = header + list;
+  // Only Name · Alumni · Phone
+  root.innerHTML = header + stats.players.map(miniRow).join("");
 }
 
 function renderOtherClubsPanel() {
-  const root = $("otherClubsPanel");
+  const root = document.getElementById("otherClubsPanel");
   if (!root) return;
 
-  const blocks = getOtherClubs().map(c => {
+  const others = (state.clubs || []).filter(c => c.slug !== state.myClubSlug);
+  if (!others.length) {
+    root.innerHTML = `<div class="hint">Add clubs to see their squads.</div>`;
+    return;
+  }
+
+  root.innerHTML = others.map(c => {
     const stats = clubStats(c.slug);
-    const list = stats.players.length
-      ? stats.players.map(p => `
-          <div class="item" style="padding:6px 0;border-bottom:1px solid #f3f4f6">
-            <div><b>${p.name || "-"}</b></div>
-            <div class="meta">${p.alumni || ""}${p.alumni && p.phone ? " · " : ""}${p.phone || ""}</div>
-          </div>
-        `).join("")
+    const listHtml = stats.players.length
+      ? stats.players.map(miniRow).join("")
       : `<div class="hint">No players yet.</div>`;
 
     return `
-      <div class="card" style="padding:12px">
-        <div class="row" style="gap:8px;align-items:center">
-          ${c.logo_url ? `<img src="${c.logo_url}" alt="${c.name}" style="width:28px;height:28px;border-radius:999px;object-fit:cover" />` : ""}
-          <div><b>${c.name}</b></div>
+      <div class="club-box">
+        <div class="club-head">
+          ${c.logo_url ? `<img src="${c.logo_url}" alt="${c.name}" class="club-logo" />` : ""}
+          <div class="club-title"><b>${c.name}</b></div>
+          <div class="club-meta">Players: ${stats.count}</div>
         </div>
-        <div style="margin-top:10px;max-height:220px;overflow:auto">${list}</div>
+        <div class="club-list">
+          ${listHtml}
+        </div>
       </div>
     `;
   }).join("");
-
+}
   root.innerHTML = blocks || `<div class="hint">Add clubs to see their squads.</div>`;
 }
 
