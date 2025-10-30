@@ -86,4 +86,8 @@ textarea { resize: vertical; }
 .ta-item { padding:8px 10px; cursor:pointer; }
 .ta-item:hover { background:#f1f5f9; }
 .ta-muted { color:#64748b; font-size:12px; }
+<style>
+  /* put anywhere in your CSS */
+  #liveBid { scroll-margin-top: 80px; } /* adjust 80px to your header height */
+</style>
 
