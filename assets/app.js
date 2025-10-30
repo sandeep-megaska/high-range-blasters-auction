@@ -519,7 +519,7 @@ function renderAdvice(liveEl, p) {
 }
 
 async function renderLiveBid() {
-  const live = $("liveBid");
+  const live = document.getElementById("liveBid");
   if (!live) return;
 
   const p = getActivePlayer();
@@ -548,30 +548,55 @@ async function renderLiveBid() {
         <label style="flex:0 1 180px">Bid Amount
           <input id="bidInput" type="number" placeholder="e.g. 900" />
         </label>
-        <button id="btn-mark-won" class="btn">HRB Won</button>
+        <button id="btn-mark-won" class="btn" disabled>HRB Won</button>
         <button id="btn-pass" class="btn btn-ghost">Pass / Assign to other club</button>
       </div>
+      <div id="bidWarn" class="hint" style="margin-top:6px;color:#dc2626"></div>
     </div>
   `;
 
-  renderAdvice(live, p);
+  // Optional advisory (rating/WK/right-hand needs)
+  try { renderAdvice(live, p); } catch {}
 
-  const bidEl = $("bidInput");
-  $("btn-mark-won")?.addEventListener("click", () => {
-    const price = bidEl ? bidEl.value : "";
+  const bidEl  = document.getElementById("bidInput");
+  const wonBtn = document.getElementById("btn-mark-won");
+  const warnEl = document.getElementById("bidWarn");
+
+  // Live guardrail validation
+  const validateBid = () => {
+    const price = Number(bidEl.value);
+    if (!Number.isFinite(price) || price < 0) {
+      warnEl.textContent = price === 0 ? "" : "Enter a valid positive amount.";
+      wonBtn.disabled = true;
+      return false;
+    }
+    const ok = guardrailOK(price);
+    wonBtn.disabled = !ok;
+    warnEl.textContent = ok
+      ? ""
+      : `Guardrail: this bid risks future slots. Keep ≤ ${Math.max(0, (remainingSlots()-1) * (state.minBasePerPlayer || 500))}.`;
+    return ok;
+  };
+  bidEl.addEventListener("input", validateBid);
+  validateBid();
+
+  // HRB Won (only fires if guardrail is OK)
+  wonBtn.addEventListener("click", () => {
+    const price = bidEl.value;
+    if (!validateBid()) return; // block if invalid
     markWon(p.id, price);
   });
 
-  $("btn-pass")?.addEventListener("click", () => {
-    const passPanel = $("passPanel");
+  // Pass / Assign
+  document.getElementById("btn-pass")?.addEventListener("click", () => {
+    const passPanel = document.getElementById("passPanel");
     if (passPanel) {
       passPanel.style.display = "block";
       passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-    wirePassPanelForPlayer(p);
+    if (typeof wirePassPanelForPlayer === "function") wirePassPanelForPlayer(p);
   });
 }
-
 async function wirePassPanelForPlayer(p) {
   const passPanel = $("passPanel");
   const passClubInput = $("passClubInput");
@@ -798,6 +823,44 @@ function render() {
   renderPlayersList();
   renderOtherClubsPanel();
   renderLiveBid();
+  renderSelectedSquad();   // ← add this line
+}
+
+function renderSelectedSquad() {
+  const root = document.getElementById("selectedList");
+  if (!root) return;
+
+  const stats = clubStats(state.myClubSlug);
+  const players = stats.players;
+
+  const header = `
+    <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div class="meta">Players: <b>${stats.count}</b> • Spend: <b>${stats.spend}</b> • Budget left: <b>${stats.budgetLeft}</b></div>
+    </div>
+  `;
+
+  if (!players.length) {
+    root.innerHTML = header + `<div class="hint">No players won yet.</div>`;
+    return;
+  }
+
+  const list = players.map(p => `
+    <div class="card" style="padding:8px;margin-bottom:6px">
+      <div class="row" style="justify-content:space-between;gap:6px">
+        <div>
+          <div><b>${p.name}</b></div>
+          <div class="meta">
+            ${p.alumni ? p.alumni + " · " : ""}${p.role || ""}
+            ${p.category ? " · Cat " + p.category : ""}
+            ${p.rating != null ? " · Rating " + p.rating : ""}
+          </div>
+        </div>
+        <div class="meta">Bid: <b>${p.finalBid ?? "-"}</b></div>
+      </div>
+    </div>
+  `).join("");
+
+  root.innerHTML = header + list;
 }
 
 async function boot() {
