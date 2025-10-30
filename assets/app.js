@@ -474,43 +474,95 @@ function wireCreateClubUI() {
    Below is an optional, simple CSV URL importer. Put your CSV URL into #csvUrl and click #btnImportCsv
    (columns: id,name,base,category,rank,role)
 */
+// --- REPLACE your existing wireCsvImportUI() with this ---
 function wireCsvImportUI() {
-  const urlEl = $("csvUrl");
-  const btn = $("btnImportCsv");
-  const msg = $("importMsg");
-  if (!btn || !urlEl) return;
-  btn.onclick = null;
-  btn.addEventListener("click", async () => {
-    msg && (msg.textContent = "");
-    const url = (urlEl.value || "").trim();
-    if (!url) { msg && (msg.textContent = "Enter CSV URL"); return; }
-    try {
-      const resp = await fetch(url);
-      const txt = await resp.text();
-      const rows = txt.trim().split(/\r?\n/);
-      const header = rows.shift().split(",");
-      const idx = (name) => header.findIndex(h => h.trim().toLowerCase() === name);
-      const idI = idx("id"), nameI = idx("name"), baseI = idx("base"), catI = idx("category"), rankI = idx("rank"), roleI = idx("role");
-      state.players = rows.map((r, i) => {
+  const urlEl = document.getElementById("csvUrl");
+  const pasteEl = document.getElementById("csvPaste");
+  const msg = document.getElementById("importMsg");
+
+  // Support BOTH naming schemes
+  const btnFetch = document.getElementById("btn-fetch") || document.getElementById("btnImportCsv");
+  const btnImport = document.getElementById("btn-import") || document.getElementById("btnImport");
+  const btnClearUrl = document.getElementById("btn-clear-url") || document.getElementById("btnClearUrl");
+  const btnClearPaste = document.getElementById("btn-clear-paste") || document.getElementById("btnClearPaste");
+
+  function setMsg(t) { if (msg) msg.textContent = t; }
+
+  if (btnFetch && urlEl) {
+    btnFetch.onclick = null;
+    btnFetch.addEventListener("click", async () => {
+      setMsg("");
+      const url = (urlEl.value || "").trim();
+      if (!url) { setMsg("Enter a Google Sheet CSV URL"); return; }
+      try {
+        const resp = await fetch(url, { cache: "no-store" });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const text = await resp.text();
+        // Put it in the textarea for visibility; optionally import directly
+        if (pasteEl) pasteEl.value = text;
+        setMsg("Fetched CSV — you can edit then click Import.");
+      } catch (e) {
+        console.error(e);
+        setMsg("Fetch failed. Check the URL & sharing settings.");
+      }
+    });
+  }
+
+  if (btnImport) {
+    btnImport.onclick = null;
+    btnImport.addEventListener("click", () => {
+      setMsg("");
+      const raw = (pasteEl?.value || "").trim();
+      if (!raw) { setMsg("Paste CSV data first or use Fetch CSV."); return; }
+
+      const rows = raw.split(/\r?\n/).filter(Boolean);
+      if (!rows.length) { setMsg("No rows detected."); return; }
+
+      const header = rows.shift().split(",").map(h => h.trim().toLowerCase());
+      const idx = (name) => header.findIndex(h => h === name);
+
+      // Try to map your common columns; fall back where missing
+      const idI   = idx("id");           // optional
+      const nameI = idx("name");         // required-ish
+      const baseI = idx("base");         // optional
+      const catI  = idx("category");     // optional
+      const rankI = idx("rank");         // optional
+      const roleI = idx("role");         // optional
+
+      const toNum = (v, d=0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+
+      const players = rows.map((r, i) => {
+        // handle quoted CSV minimally
+        // (for simple sheets this split is fine; if you need full CSV parsing later, we can add it)
         const cols = r.split(",");
         return {
-          id: cols[idI] || String(i+1),
-          name: cols[nameI] || `Player ${i+1}`,
-          base: toNum(cols[baseI], 500),
-          category: cols[catI] || "",
-          rank: toNum(cols[rankI], i+1),
-          role: cols[roleI] || "",
+          id: (idI >= 0 ? cols[idI] : String(i+1)).trim(),
+          name: (nameI >= 0 ? cols[nameI] : `Player ${i+1}`).trim(),
+          base: toNum(baseI >= 0 ? cols[baseI] : "", 500),
+          category: (catI >= 0 ? cols[catI] : "").trim(),
+          rank: toNum(rankI >= 0 ? cols[rankI] : i+1),
+          role: (roleI >= 0 ? cols[roleI] : "").trim(),
           status: "new"
         };
       });
-      persist();
+
+      // Save to state & render
+      state.players = players;
+      try { localStorage.setItem("hrb-auction-state", JSON.stringify(state)); } catch {}
       render();
-      msg && (msg.textContent = "Players imported.");
-    } catch (e) {
-      console.error(e);
-      msg && (msg.textContent = "Failed to import CSV.");
-    }
-  });
+      setMsg(`Imported ${players.length} players.`);
+    });
+  }
+
+  if (btnClearUrl && urlEl) {
+    btnClearUrl.onclick = null;
+    btnClearUrl.addEventListener("click", () => { urlEl.value = ""; setMsg(""); });
+  }
+
+  if (btnClearPaste && pasteEl) {
+    btnClearPaste.onclick = null;
+    btnClearPaste.addEventListener("click", () => { pasteEl.value = ""; setMsg(""); });
+  }
 }
 
 /* ===========================
