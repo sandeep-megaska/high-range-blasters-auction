@@ -4,28 +4,32 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>High Range Blasters — Auction Assist</title>
+
   <link rel="stylesheet" href="/assets/styles.css" />
+
+  <!-- Supabase UMD (global) BEFORE app scripts -->
   <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
- <script>
-// Load Supabase UMD (global) BEFORE your app scripts
+  <script>
+    // Expose Supabase env for assets/supabaseClient.js
     window.ENV = {
-    SUPABASE_URL: "https://zwusmrtwnptkowgosfly.supabase.co",
-    SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3dXNtcnR3bnB0a293Z29zZmx5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAzMzQzMDQsImV4cCI6MjA3NTkxMDMwNH0.IKrr8x6xOCXicSd1GJiDpR3mzamhytMCon0cY_1KxD4"
-  };
-</script>
+      SUPABASE_URL: "https://zwusmrtwnptkowgosfly.supabase.co",
+      SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3dXNtcnR3bnB0a293Z29zZmx5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAzMzQzMDQsImV4cCI6MjA3NTkxMDMwNH0.IKrr8x6xOCXicSd1GJiDpR3mzamhytMCon0cY_1KxD4"
+    };
+  </script>
+
+  <style>
+    /* Make anchor jumps land below the header */
+    #playersList, #liveBid, #addClubCard { scroll-margin-top: 80px; }
+  </style>
 </head>
 
 <body>
- <nav class="row" style="gap:12px;margin-bottom:12px;">
-  <a href="#playersList">Players</a>
-  <a href="#liveBid">Live Bid</a>
-  <a href="#addClubCard">Manage Clubs</a>
-</nav>
-<style>
-  /* put anywhere in your CSS */
-  #liveBid { scroll-margin-top: 80px; } /* adjust 80px to your header height */
-</style>
-
+  <!-- Top shortcuts -->
+  <nav class="row" style="gap:12px;margin-bottom:12px;">
+    <a href="#playersList">Players</a>
+    <a href="#liveBid">Live Bid</a>
+    <a href="#addClubCard">Manage Clubs</a>
+  </nav>
 
   <div id="app" class="page">
     <header class="topbar">
@@ -158,6 +162,7 @@
             <button id="btn-import" class="btn">Import</button>
             <button id="btn-clear-paste" class="btn btn-ghost">Clear</button>
           </div>
+          <div id="importMsg" class="hint" style="margin-top:6px;"></div>
         </div>
       </section>
 
@@ -180,7 +185,6 @@
         </div>
 
         <div id="liveBid" style="margin-top:10px"></div>
-<!-- Pass / Assign to other club UI -->
 
         <h2 style="margin-top:14px">Selected Squad</h2>
         <div id="selectedList"></div>
@@ -193,139 +197,131 @@
         <div class="list" id="playersList"></div>
       </section>
     </main>
-<!-- ADD CLUB (Minimal) -->
-<section class="card" id="addClubCard">
-  <h2>Add Club</h2>
-  <div class="form-grid">
-    <label>Club name
-      <input id="clubName" placeholder="Coastal Strikers" />
-    </label>
-    <label>Logo URL (optional)
-      <input id="clubLogo" placeholder="./assets/logo.svg or https://…" />
-    </label>
-    <label>Starting Budget (points)
-      <input id="clubBudget" type="number" placeholder="15000" />
-    </label>
-  </div>
-  <div class="row" style="margin-top:10px;">
-    <button id="btnCreateClub" class="btn">Create Club</button>
-    <div id="clubCreateMsg" class="hint" style="margin-left:8px;"></div>
-  </div>
-</section>
-<!-- Pass / Assign to other club UI -->
-<div id="passPanel" class="card" style="margin-top:10px; display:none">
-  <h3>Assign to Other Club</h3>
-  <div class="form-grid">
-    <label> Club
-      <!-- select is filled dynamically; datalist also enables type-to-search -->
-      <input list="clubNames" id="passClubInput" placeholder="Start typing club name…" />
-      <datalist id="clubNames"></datalist>
-    </label>
-    <label> Winning Price
-      <input type="number" id="passBidAmount" placeholder="e.g. 900" />
-    </label>
-  </div>
-  <div class="row" style="margin-top:8px;">
-    <button id="btn-assign-to-club" class="btn">Assign</button>
-    <div class="hint" id="passPanelMsg" style="margin-left:8px;"></div>
-  </div>
-</div>
 
-<!-- OTHER CLUBS LIVE SQUADS -->
-<section class="card">
-  <h2>Other Clubs — Live Squads</h2>
-  <p class="hint">Updates as you mark players “won” by other clubs.</p>
-  <div id="otherClubsPanel" class="grid"></div>
-</section>
+    <!-- ADD CLUB (Minimal) -->
+    <section class="card" id="addClubCard">
+      <h2>Add Club</h2>
+      <div class="form-grid">
+        <label>Club name
+          <input id="clubName" placeholder="Coastal Strikers" />
+        </label>
+        <label>Logo URL (optional)
+          <input id="clubLogo" placeholder="./assets/logo.svg or https://…" />
+        </label>
+        <label>Starting Budget (points)
+          <input id="clubBudget" type="number" placeholder="15000" />
+        </label>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button id="btnCreateClub" class="btn">Create Club</button>
+        <div id="clubCreateMsg" class="hint" style="margin-left:8px;"></div>
+      </div>
+    </section>
+
+    <!-- Pass / Assign to other club UI -->
+    <div id="passPanel" class="card" style="margin-top:10px; display:none">
+      <h3>Assign to Other Club</h3>
+      <div class="form-grid">
+        <label> Club
+          <input list="clubNames" id="passClubInput" placeholder="Start typing club name…" />
+          <datalist id="clubNames"></datalist>
+        </label>
+        <label> Winning Price
+          <input type="number" id="passBidAmount" placeholder="e.g. 900" />
+        </label>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button id="btn-assign-to-club" class="btn">Assign</button>
+        <div class="hint" id="passPanelMsg" style="margin-left:8px;"></div>
+      </div>
+    </div>
+
+    <!-- OTHER CLUBS LIVE SQUADS -->
+    <section class="card">
+      <h2>Other Clubs — Live Squads</h2>
+      <p class="hint">Updates as you mark players “won” by other clubs.</p>
+      <div id="otherClubsPanel" class="grid"></div>
+    </section>
 
     <footer class="footer">
       <span>Session is saved locally. Optional cloud sync via Supabase.</span>
     </footer>
   </div>
 
- <script type="module">
-  function $(id){ return document.getElementById(id); }
-  function isHidden(el){ return !el || el.offsetParent === null; }
-
-  function showMainAppIfNeeded(targetId){
-    // If Live Bid is requested but appMain is hidden, reveal it and hide modals
-    if (targetId === "liveBid") {
-      const appMain = $("appMain");
-      if (appMain && getComputedStyle(appMain).display === "none") {
-        // hide login/settings if they’re up
-        const login = $("loginView"); if (login) login.style.display = "none";
-        const settings = $("settingsView"); if (settings) settings.style.display = "none";
-        appMain.style.display = "grid"; // was none
+  <!-- Hash navigation that also reveals appMain if deep-linking to Live Bid -->
+  <script>
+    (function hashNav(){
+      function $(id){ return document.getElementById(id); }
+      function isHidden(el){ return !el || el.offsetParent === null; }
+      function showMainIfNeeded(targetId){
+        if (targetId === "liveBid") {
+          const appMain = $("appMain");
+          if (appMain && getComputedStyle(appMain).display === "none") {
+            $("loginView") && ( $("loginView").style.display = "none");
+            $("settingsView") && ( $("settingsView").style.display = "none");
+            appMain.style.display = "grid";
+          }
+        }
       }
-    }
-  }
-
-  function scrollToId(id, tries = 12) {
-    const el = $(id);
-    if (el && !isHidden(el)) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
-      return true;
-    }
-    if (tries > 0) setTimeout(() => scrollToId(id, tries - 1), 100);
-    return false;
-  }
-
-  function wireHashScrolling() {
-    document.querySelectorAll('a[href*="#"]').forEach(a => {
-      a.addEventListener("click", (e) => {
-        const href = a.getAttribute("href") || "";
-        const id = href.includes("#") ? href.split("#").pop() : "";
-        if (!id) return;
-        e.preventDefault();
-        history.pushState(null, "", "#" + id);
-        showMainAppIfNeeded(id);
-        // try a couple times in case Live Bid renders after showing appMain
-        setTimeout(() => scrollToId(id), 0);
-        setTimeout(() => scrollToId(id), 150);
+      function scrollToId(id, tries=12){
+        const el = $(id);
+        if (el && !isHidden(el)) { el.scrollIntoView({behavior:"smooth", block:"start"}); return true; }
+        if (tries>0) setTimeout(()=>scrollToId(id, tries-1), 100);
+        return false;
+      }
+      document.addEventListener("DOMContentLoaded", () => {
+        document.querySelectorAll('a[href*="#"]').forEach(a => {
+          a.addEventListener("click", (e) => {
+            const href = a.getAttribute("href") || "";
+            const id = href.includes("#") ? href.split("#").pop() : "";
+            if (!id) return;
+            e.preventDefault();
+            history.pushState(null, "", "#" + id);
+            showMainIfNeeded(id);
+            setTimeout(()=>scrollToId(id), 0);
+            setTimeout(()=>scrollToId(id), 150);
+          });
+        });
+        window.addEventListener("hashchange", () => {
+          const id = (location.hash || "").slice(1);
+          if (!id) return;
+          showMainIfNeeded(id);
+          scrollToId(id);
+        });
+        const initial = (location.hash || "").slice(1);
+        if (initial) { showMainIfNeeded(initial); setTimeout(()=>scrollToId(initial), 0); }
       });
-    });
+    })();
+  </script>
 
-    window.addEventListener("hashchange", () => {
-      const id = (location.hash || "").slice(1);
-      if (!id) return;
-      showMainAppIfNeeded(id);
-      scrollToId(id);
-    });
+  <!-- Catchable ES-module loader: imports assets and runs boot(); shows big overlay if anything fails -->
+  <script type="module">
+    (async () => {
+      try {
+        console.time("modules");
+        await import("./assets/utils.js");
+        await import("./assets/constraints.js");
+        await import("./assets/supabaseClient.js");
+        const app = await import("./assets/app.js");  // expected to define boot() & render()
+        console.timeEnd("modules");
 
-    const initial = (location.hash || "").slice(1);
-    if (initial) {
-      showMainAppIfNeeded(initial);
-      setTimeout(() => scrollToId(initial), 0);
-    }
-  }
-
-  // Make sure the target doesn't hide under the header
-  const style = document.createElement("style");
-  style.textContent = `#liveBid { scroll-margin-top: 80px; }`;
-  document.head.appendChild(style);
-
-  document.addEventListener("DOMContentLoaded", wireHashScrolling);
-</script>
-<script>
-  (function errorOverlay(){
-    let shown = false;
-    function show(msg, src, line, col){
-      if (shown) return; shown = true;
-      const div = document.createElement('div');
-      div.style.cssText = 'position:fixed;z-index:99999;inset:0;background:#111a;padding:16px;color:#fff;font:14px/1.4 system-ui;overflow:auto';
-      div.innerHTML = '<b>⚠️ JavaScript crashed</b><br>' +
-                      '<div style="margin-top:8px;white-space:pre-wrap">' +
-                      (msg||'Unknown error') + '\n' +
-                      (src?('at '+src+ (line? (':'+line+(col?':'+col:'')) : '') ):'') +
-                      '</div>';
-      document.body.appendChild(div);
-      console.error('[BOOT ERROR]', msg, src, line, col);
-    }
-    window.addEventListener('error', e => show(e.message, e.filename, e.lineno, e.colno));
-    window.addEventListener('unhandledrejection', e => show('Promise: '+(e.reason?.message||e.reason)));
-  })();
-</script>
-
-
+        // Try to call boot no matter how it's exposed
+        const maybeBoot = (window.boot || app.boot || (window.App && window.App.boot));
+        if (typeof maybeBoot === "function") {
+          await maybeBoot();
+          console.log("[init] boot() ran");
+        } else {
+          console.warn("[init] boot() not found. Expose boot from assets/app.js: window.boot = boot;");
+        }
+      } catch (e) {
+        console.error("[init] Module load failed:", e);
+        const div = document.createElement("div");
+        div.style.cssText = "position:fixed;inset:0;z-index:99999;background:#111;color:#fff;padding:16px;overflow:auto;font:14px/1.4 system-ui";
+        div.innerHTML = `<b>⚠️ Failed to load modules</b>
+<pre style="white-space:pre-wrap;margin-top:8px">${(e && (e.stack||e.message||e))}</pre>`;
+        document.body.appendChild(div);
+      }
+    })();
+  </script>
 </body>
 </html>
