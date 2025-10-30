@@ -102,6 +102,45 @@ function toNum(v, fallback=0) {
   return Number.isFinite(n) ? n : Number(fallback) || 0;
 }
 
+function findPlayerById(id) {
+  return (state.players || []).find(p => String(p.id) === String(id));
+}
+
+function getClubBySlug(slug) {
+  return (state.clubs || []).find(c => c.slug === slug);
+}
+
+// Try locating a club by slug first, then by display name (case-insensitive)
+function findClubByInput(input) {
+  const s = (input || "").trim();
+  if (!s) return null;
+  const lc = s.toLowerCase();
+  return getClubBySlug(s) ||
+         (state.clubs || []).find(c => c.name?.toLowerCase() === lc);
+}
+
+function remainingPlayers() {
+  return (state.players || []).filter(p => p.status !== "won" && p.status !== "lost");
+}
+
+function clearPicker() {
+  const input = document.getElementById("startName");
+  if (input) input.value = "";
+}
+
+function afterAssignmentRefresh() {
+  persist();
+  render();
+  clearPicker();
+  const passPanel = document.getElementById("passPanel");
+  if (passPanel) passPanel.style.display = "none";
+}
+
+
+
+
+
+
 function remainingSlots() {
   const my = clubStats(state.myClubSlug);
   const taken = my.count;
@@ -258,32 +297,31 @@ function setActivePlayer(id) {
   render();
 }
 
-async function markWon(id, bid) {
-  const winningBid = Math.max(0, toNum(bid, 0));
-  state.players = state.players.map(p => p.id === id ? { ...p, status: "won", owner: state.myClubSlug, finalBid: winningBid } : p);
-  state.log.push({ type: "won", id, bid: winningBid });
-  state.activeId = null;
-  persist();
-  try {
-    const hrb = (state.clubs || []).find(c => c.slug === state.myClubSlug);
-    if (hrb?.id && sb) {
-      await updateBudgetDB(hrb.id, -winningBid);
-      state.clubs = await fetchClubs();
-      persist();
-    }
-  } catch (e) {
-    console.warn("updateBudgetDB(HRB) failed:", e);
+// HRB (my club) wins
+async function markWon(playerId, finalBid) {
+  const p = findPlayerById(playerId);
+  if (!p) { alert("Player not found."); return; }
+  const price = Number(finalBid);
+  if (!Number.isFinite(price) || price < 0) { alert("Enter a valid final bid."); return; }
+
+  p.status   = "won";
+  p.owner    = state.myClubSlug;       // your club slug (e.g., 'hrb')
+  p.finalBid = price;
+
+  // Optional: deduct from my club budget if you track it
+  const me = getClubBySlug(state.myClubSlug);
+  if (me && typeof me.budget === "number") {
+    me.budget = Math.max(0, me.budget - price);
   }
-  render();
-    afterAssignmentRefresh();
+
+  afterAssignmentRefresh();
 }
+
 
 /* ===========================
    Rendering
 =========================== */
-function remainingPlayers() {
-  return (state.players || []).filter(p => p.status !== "won" && p.status !== "lost");
-}
+
 
 function renderPlayersList() {
   const listEl   = document.getElementById("playersList");
@@ -430,16 +468,7 @@ async function wirePassPanelForPlayer(p) {
     render();
   });
 }
-function clearPicker() {
-  const input = document.getElementById("startName");
-  if (input) input.value = "";
-}
 
-function afterAssignmentRefresh() {
-  persist();
-  render();        // re-renders lists & counts
-  clearPicker();   // ready for next player
-}
 
 async function renderLiveBid(){
   const live = $("liveBid");
