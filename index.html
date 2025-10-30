@@ -306,6 +306,96 @@
 
   document.addEventListener("DOMContentLoaded", wireHashScrolling);
 </script>
+<script type="module">
+  // Force-bind Fetch/Import/Clear regardless of other script errors
+  function bindOnce(el, type, handler){
+    if (!el) return;
+    el.replaceWith(el.cloneNode(true)); // drop existing listeners
+    el = document.getElementById(el.id);
+    el.addEventListener(type, handler);
+  }
+
+  function setMsg(text){
+    const msg = document.getElementById("importMsg");
+    if (msg) msg.textContent = text;
+  }
+
+  async function doFetchCsv(){
+    try {
+      setMsg("");
+      const urlEl = document.getElementById("csvUrl");
+      const pasteEl = document.getElementById("csvPaste");
+      const url = (urlEl?.value || "").trim();
+      if (!url) { setMsg("Enter a Google Sheet CSV URL"); return; }
+      const resp = await fetch(url, { cache: "no-store" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const text = await resp.text();
+      if (pasteEl) pasteEl.value = text;
+      setMsg("Fetched CSV — click Import to load players.");
+    } catch (e) {
+      console.error("Fetch CSV failed:", e);
+      setMsg("Fetch failed. Check the URL & sharing (Publish to web).");
+    }
+  }
+
+  function doImportCsv(){
+    try {
+      setMsg("");
+      const pasteEl = document.getElementById("csvPaste");
+      const raw = (pasteEl?.value || "").trim();
+      if (!raw) { setMsg("Paste CSV data first or use Fetch CSV."); return; }
+      const rows = raw.split(/\r?\n/).filter(Boolean);
+      const header = rows.shift()?.split(",")?.map(h => h.trim().toLowerCase()) || [];
+      const idx = n => header.indexOf(n);
+      const idI=idx("id"), nameI=idx("name"), baseI=idx("base"), catI=idx("category"), rankI=idx("rank"), roleI=idx("role");
+      const toNum = (v,d=0)=>{ const n=Number(v); return Number.isFinite(n)?n:d; };
+
+      const players = rows.map((r,i)=>{
+        const cols = r.split(",");
+        return {
+          id: (idI>=0?cols[idI]:String(i+1)).trim(),
+          name: (nameI>=0?cols[nameI]:`Player ${i+1}`).trim(),
+          base: toNum(baseI>=0?cols[baseI]: "", 500),
+          category: (catI>=0?cols[catI]:"").trim(),
+          rank: toNum(rankI>=0?cols[rankI]: i+1),
+          role: (roleI>=0?cols[roleI]:"").trim(),
+          status: "new"
+        };
+      });
+
+      // minimal state injection so the rest of the UI can render
+      const SKEY = "hrb-auction-state";
+      let st = {};
+      try { st = JSON.parse(localStorage.getItem(SKEY) || "{}") || {}; } catch {}
+      st.players = players;
+      if (!st.playersNeeded) st.playersNeeded = 15;
+      if (!st.totalPoints) st.totalPoints = 15000;
+      if (!st.minBasePerPlayer) st.minBasePerPlayer = 500;
+      localStorage.setItem(SKEY, JSON.stringify(st));
+
+      // if render() exists, call it; else reload as a fallback
+      if (typeof window.render === "function") {
+        window.render();
+      }
+      setMsg(`Imported ${players.length} players.`);
+      // scroll to Players list for visibility
+      document.getElementById("playersList")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch(e){
+      console.error("Import failed:", e);
+      setMsg("Import failed. Check CSV format.");
+    }
+  }
+
+  function doClearUrl(){ const el=document.getElementById("csvUrl"); if (el) el.value=""; setMsg(""); }
+  function doClearPaste(){ const el=document.getElementById("csvPaste"); if (el) el.value=""; setMsg(""); }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    bindOnce(document.getElementById("btn-fetch"), "click", doFetchCsv);
+    bindOnce(document.getElementById("btn-import"), "click", doImportCsv);
+    bindOnce(document.getElementById("btn-clear-url"), "click", doClearUrl);
+    bindOnce(document.getElementById("btn-clear-paste"), "click", doClearPaste);
+  });
+</script>
 
 </body>
 </html>
