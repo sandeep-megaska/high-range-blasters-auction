@@ -921,10 +921,7 @@ async function wirePassPanelForPlayer(p) {
 
 
 
- document.getElementById("btn-pass")?.addEventListener("click", () => {
-  const passPanel = document.getElementById("passPanel");
-  if (passPanel) passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
-});
+
 
 }
 
@@ -977,4 +974,4 @@ function wireCreateClubUI() {
 document.addEventListener("DOMContentLoaded", () => {
   try { wireCreateClubUI(); } catch {}
 });
-await wirePassPanelForPlayer(p);
+
