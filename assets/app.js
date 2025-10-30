@@ -505,78 +505,60 @@ function normalizeHeader(h) {
     .replace(/[._-]+/g, " ");
 }
 
+// STRICT parser — reads only what the sheet provides.
+// Expected headers (case/spacing doesn’t matter):
+//   Name / Player Name
+//   Rank
+//   Category (optional)
+//   Role (optional)
+//   Bid / Start Bid / Seed (optional)  <-- if missing, we leave it empty
 function parseCSVPlayers(raw) {
   const rows = splitCsv(raw).filter(r => r.some(c => String(c).trim() !== ""));
   if (!rows.length) return [];
 
-  // Find header row: first row that contains at least 2 of the known columns
+  // find header
   const headerRowIdx = rows.findIndex(r => {
     const h = r.map(normalizeHeader);
-    const known = ["name","player name","player","category","cat","rank","#","base","base value","seed","seed base","role","playing role","type"];
-    const hits = h.filter(x => known.includes(x)).length;
-    return hits >= 2;
+    const hits = ["name","player name","rank"].filter(k => h.includes(k)).length;
+    return hits >= 2; // must at least have name + rank
   });
+  if (headerRowIdx < 0) return [];
 
-  // If a header exists, use it
-  if (headerRowIdx >= 0) {
-    const header = rows[headerRowIdx].map(normalizeHeader);
-    const body = rows.slice(headerRowIdx + 1);
+  const header = rows[headerRowIdx].map(normalizeHeader);
+  const body = rows.slice(headerRowIdx + 1);
 
-    // Index helpers: try several aliases
-    const idxOf = (names) => {
-      for (const n of names) {
-        const i = header.indexOf(n);
-        if (i >= 0) return i;
-      }
-      return -1;
-    };
+  const idxOf = (...aliases) => {
+    for (const a of aliases) {
+      const i = header.indexOf(a);
+      if (i >= 0) return i;
+    }
+    return -1;
+  };
 
-    const nameI = idxOf(["name","player name","player"]);
-    const catI  = idxOf(["category","cat","category no"]);
-    const baseI = idxOf(["base","base value","seed","seed base","seed base value"]);
-    const rankI = idxOf(["rank","#","s no","s. no","s. no."]);
-    const roleI = idxOf(["role","playing role","type"]);
+  const iName = idxOf("name","player name","player");
+  const iRank = idxOf("rank","#","s no","s. no","serial","sr no");
+  const iCat  = idxOf("category","cat");
+  const iRole = idxOf("role","playing role","type");
+  const iBid  = idxOf("bid","start bid","seed","seed base","base value");
 
-    const players = [];
-    body.forEach((cols, i) => {
-      const name = (cols[nameI] || "").trim();
-      if (!name) return;
-      const p = {
-        id: String(players.length + 1),
-        name,
-        base: Number(cols[baseI]) || 500,
-        category: (cols[catI] || "").toString().trim(),
-        rank: Number(cols[rankI]) || (players.length + 1),
-        role: (cols[roleI] || "").toString().trim(),
-        status: "new",
-      };
-      players.push(p);
-    });
-    if (players.length) return players;
-    // fallthrough to loose mode if header produced nothing
-  }
-
-  // Fallback: parse free-form “Bidded …” or serial lines
-  const players = rows.map((r, i) => {
-    const line = r.join(" ").trim();
-    let name =
-      (line.match(/bidded\s+([^,0-9][^,]+)/i)?.[1] || "") ||
-      (line.match(/^\s*\d+\s*[\.\-]?\s*([A-Za-z][A-Za-z\s.'-]{2,})/)?.[1] || "");
-    name = name.trim();
-    if (!name) name = `Player ${i + 1}`;
-
-    const nums = [...line.matchAll(/(\d{3,4})/g)].map(m => Number(m[1]));
-    const base = nums.length ? nums[nums.length - 1] : 500;
-
-    return {
-      id: String(i + 1),
+  const players = [];
+  body.forEach((cols) => {
+    const name = (cols[iName] || "").trim();
+    if (!name) return;
+    const rank = Number(cols[iRank]) || null;
+    const category = (iCat >= 0 ? String(cols[iCat]).trim() : "");
+    const role     = (iRole>= 0 ? String(cols[iRole]).trim() : "");
+    const seedBid  = (iBid >= 0 ? Number(cols[iBid]) : null);
+    players.push({
+      id: String(players.length + 1),
       name,
-      base,
-      category: "",
-      rank: i + 1,
-      role: "",
+      // NOTICE: we DO NOT create any base if it’s not in the sheet
+      base: (Number.isFinite(seedBid) ? seedBid : null),
+      rank,
+      category,
+      role,
       status: "new",
-    };
+    });
   });
   return players;
 }
