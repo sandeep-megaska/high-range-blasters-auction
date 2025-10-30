@@ -231,6 +231,10 @@ function reapplyPreselectedIfAny() {
   const { playersUpdated } = applyPreselected(preList, state.players);
   state.players = playersUpdated;
 }
+function getOtherClubs() {
+  const all = Array.isArray(state.clubs) ? state.clubs : [];
+  return all.filter(c => c.slug !== state.myClubSlug);
+}
 
 // -------- Settings ----------
 function updateAvailableScorePreview(){
