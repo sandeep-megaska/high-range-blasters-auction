@@ -379,45 +379,6 @@ async function addClubAndRefresh({ name, logo_url, starting_budget }) {
   }
 }
 
-function renderOtherClubsPanel() {
-  const root = document.getElementById("otherClubsPanel");
-  if (!root) return;
-  const others = (state.clubs || []).filter(c => c.slug !== state.myClubSlug);
-  const blocks = others.map(c => {
-    const players = (state.players || []).filter(p => p.status === "won" && p.owner === c.slug);
-    const spend = players.reduce((s, p) => s + (Number(p.finalBid) || 0), 0);
-    const budgetLeft = typeof c.budget_left === "number"
-      ? c.budget_left
-      : Math.max(0, (Number(c.starting_budget) || 0) - spend);
-
-    const list = players.length
-      ? players.map(p => `
-          <div class="item" style="padding:6px 0;border-bottom:1px solid #f3f4f6">
-            <div class="title"><b>${p.name}</b></div>
-            <div class="meta">#${p.rank ?? "-"} · Cat ${p.category ?? "-"} · ${p.role ?? ""}</div>
-            <div class="meta">Bid: <b>${p.finalBid ?? "-"}</b></div>
-          </div>
-        `).join("")
-      : `<div class="hint">No players yet.</div>`;
-
-    return `
-      <div class="card" style="padding:12px">
-        <div class="row">
-          ${c.logo_url ? `<img src="${c.logo_url}" alt="${c.name}" style="width:36px;height:36px;border-radius:999px;object-fit:cover;margin-right:8px;" />`
-                        : `<div style="width:36px;height:36px;border-radius:999px;background:#e5e7eb;margin-right:8px;"></div>`}
-          <div>
-            <div class="title"><b>${c.name}</b></div>
-            <div class="meta">Players: ${players.length} • Spend: ${spend} • Budget left: ${budgetLeft}</div>
-          </div>
-        </div>
-        <div style="margin-top:10px; max-height:220px; overflow:auto;">${list}</div>
-      </div>
-    `;
-  }).join("");
-
-  root.innerHTML = blocks || `<div class="hint">Add clubs to see their squads.</div>`;
-}
-
 
 async function ensureMyClubSeeded() {
   // Pull clubs from DB first
