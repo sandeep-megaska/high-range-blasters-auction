@@ -8,6 +8,13 @@
 </head>
 
 <body>
+  <script>
+  window.ENV = {
+    SUPABASE_URL: "https://YOUR-PROJECT.supabase.co",
+    SUPABASE_ANON_KEY: "YOUR_ANON_KEY"
+  };
+</script>
+
   <div id="app" class="page">
     <header class="topbar">
       <div class="brand">
@@ -161,6 +168,24 @@
         </div>
 
         <div id="liveBid" style="margin-top:10px"></div>
+<!-- Pass / Assign to other club UI -->
+<div id="passPanel" class="card" style="margin-top:10px; display:none">
+  <h3>Assign to Other Club</h3>
+  <div class="form-grid">
+    <label> Club
+      <!-- select is filled dynamically; datalist also enables type-to-search -->
+      <input list="clubNames" id="passClubInput" placeholder="Start typing club name…" />
+      <datalist id="clubNames"></datalist>
+    </label>
+    <label> Winning Price
+      <input type="number" id="passBidAmount" placeholder="e.g. 900" />
+    </label>
+  </div>
+  <div class="row" style="margin-top:8px;">
+    <button id="btn-assign-to-club" class="btn">Assign</button>
+    <div class="hint" id="passPanelMsg" style="margin-left:8px;"></div>
+  </div>
+</div>
 
         <h2 style="margin-top:14px">Selected Squad</h2>
         <div id="selectedList"></div>
@@ -192,6 +217,24 @@
     <div id="club-create-msg" class="hint" style="margin-left:8px;"></div>
   </div>
 </section>
+<!-- Pass / Assign to other club UI -->
+<div id="passPanel" class="card" style="margin-top:10px; display:none">
+  <h3>Assign to Other Club</h3>
+  <div class="form-grid">
+    <label> Club
+      <!-- select is filled dynamically; datalist also enables type-to-search -->
+      <input list="clubNames" id="passClubInput" placeholder="Start typing club name…" />
+      <datalist id="clubNames"></datalist>
+    </label>
+    <label> Winning Price
+      <input type="number" id="passBidAmount" placeholder="e.g. 900" />
+    </label>
+  </div>
+  <div class="row" style="margin-top:8px;">
+    <button id="btn-assign-to-club" class="btn">Assign</button>
+    <div class="hint" id="passPanelMsg" style="margin-left:8px;"></div>
+  </div>
+</div>
 
 <!-- OTHER CLUBS LIVE SQUADS -->
 <section class="card">
