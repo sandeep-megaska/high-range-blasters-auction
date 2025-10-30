@@ -1,24 +1,59 @@
-// Optional Supabase (read-only for now). Works if you add env vars in Vercel.
-// In Vercel → Project → Settings → Environment Variables:
-//   NEXT_PUBLIC_SUPABASE_URL
-//   NEXT_PUBLIC_SUPABASE_ANON_KEY
-// If you leave them empty, app still works fully offline (localStorage + CSV).
+// assets/supabaseClient.js
+// Create a single client using ENV defined in index.html (window.ENV.*)
+const { createClient } = window.supabase;
 
-export const SUPABASE_URL = window?.ENV?.NEXT_PUBLIC_SUPABASE_URL || "";
-export const SUPABASE_ANON = window?.ENV?.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-
-// We won’t import the SDK yet to keep things simple and zero-build.
-// Later we can add <script src="https://esm.sh/@supabase/supabase-js"></script>
-// and a small wrapper to fetch constraints/settings/team.
-
-export async function loadConstraintsFromSupabase(team_slug){
-  // Placeholder – return null to use DEFAULT_CONSTRAINTS
-  // Later: call Supabase REST (PostgREST) or SDK to retrieve roster_constraints.
-  return null;
+if (!window.ENV?.SUPABASE_URL || !window.ENV?.SUPABASE_ANON_KEY) {
+  console.warn("Supabase ENV missing. Set window.ENV in index.html.");
 }
 
-export async function loadSettingsFromSupabase(team_slug){
-  // Placeholder – return null to use local settings UI
-  return null;
+export const sb = createClient(window.ENV.SUPABASE_URL, window.ENV.SUPABASE_ANON_KEY);
+
+// --- Clubs CRUD ---
+export async function fetchClubs() {
+  const { data, error } = await sb.from("clubs").select("*").order("name", { ascending: true });
+  if (error) throw error;
+  return data || [];
 }
 
+export async function createClubDB({ slug, name, logo_url, starting_budget }) {
+  const { error } = await sb.from("clubs").insert({
+    slug, name, logo_url: logo_url || null,
+    starting_budget: starting_budget ?? 15000,
+    budget_left: starting_budget ?? 15000
+  });
+  if (error) throw error;
+}
+
+export async function updateClubDB({ id, name, logo_url, starting_budget }) {
+  const patch = {};
+  if (name != null) patch.name = name;
+  if (logo_url !== undefined) patch.logo_url = logo_url || null;
+  if (starting_budget != null) {
+    patch.starting_budget = starting_budget;
+    // keep budget_left if larger than new start? we won't touch here.
+  }
+  const { error } = await sb.from("clubs").update(patch).eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteClubDB(id) {
+  const { error } = await sb.from("clubs").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function adjustBudgetDB({ club_id, delta }) {
+  const { error } = await sb.rpc("adjust_budget", { p_club_id: club_id, p_delta: delta });
+  if (error) throw error;
+}
+
+// --- Realtime subscription for clubs ---
+export function onClubsRealtime(callback) {
+  return sb
+    .channel("clubs-live")
+    .on("postgres_changes", { event: "*", schema: "public", table: "clubs" }, callback)
+    .subscribe();
+}
+
+// Existing helpers you already used:
+export async function loadSettingsFromSupabase(team) { return null; }
+export async function loadConstraintsFromSupabase(team) { return []; }
