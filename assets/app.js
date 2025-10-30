@@ -451,6 +451,114 @@ function wireCreateClubUI() {
     }
   });
 }
+// --- CSV parsing helpers (robust; quoted fields & flexible headers) ---
+function splitCsv(text) {
+  const rows = [];
+  let cur = [], field = "", inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i], next = text[i+1];
+    if (inQuotes) {
+      if (ch === '"' && next === '"') { field += '"'; i++; }
+      else if (ch === '"') { inQuotes = false; }
+      else { field += ch; }
+    } else {
+      if (ch === '"') inQuotes = true;
+      else if (ch === ',') { cur.push(field); field = ""; }
+      else if (ch === '\n' || ch === '\r') {
+        // end of row; also skip \r\n double-count
+        if (field.length || cur.length) { cur.push(field); rows.push(cur); }
+        field = ""; cur = [];
+        if (ch === '\r' && next === '\n') i++;
+      } else field += ch;
+    }
+  }
+  if (field.length || cur.length) { cur.push(field); rows.push(cur); }
+  return rows;
+}
+
+function normalizeHeader(h) {
+  return String(h || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[._-]+/g, " ");
+}
+
+function parseCSVPlayers(raw) {
+  const rows = splitCsv(raw).filter(r => r.some(c => String(c).trim() !== ""));
+  if (!rows.length) return [];
+
+  // Find header row: first row that contains at least 2 of the known columns
+  const headerRowIdx = rows.findIndex(r => {
+    const h = r.map(normalizeHeader);
+    const known = ["name","player name","player","category","cat","rank","#","base","base value","seed","seed base","role","playing role","type"];
+    const hits = h.filter(x => known.includes(x)).length;
+    return hits >= 2;
+  });
+
+  // If a header exists, use it
+  if (headerRowIdx >= 0) {
+    const header = rows[headerRowIdx].map(normalizeHeader);
+    const body = rows.slice(headerRowIdx + 1);
+
+    // Index helpers: try several aliases
+    const idxOf = (names) => {
+      for (const n of names) {
+        const i = header.indexOf(n);
+        if (i >= 0) return i;
+      }
+      return -1;
+    };
+
+    const nameI = idxOf(["name","player name","player"]);
+    const catI  = idxOf(["category","cat","category no"]);
+    const baseI = idxOf(["base","base value","seed","seed base","seed base value"]);
+    const rankI = idxOf(["rank","#","s no","s. no","s. no."]);
+    const roleI = idxOf(["role","playing role","type"]);
+
+    const players = [];
+    body.forEach((cols, i) => {
+      const name = (cols[nameI] || "").trim();
+      if (!name) return;
+      const p = {
+        id: String(players.length + 1),
+        name,
+        base: Number(cols[baseI]) || 500,
+        category: (cols[catI] || "").toString().trim(),
+        rank: Number(cols[rankI]) || (players.length + 1),
+        role: (cols[roleI] || "").toString().trim(),
+        status: "new",
+      };
+      players.push(p);
+    });
+    if (players.length) return players;
+    // fallthrough to loose mode if header produced nothing
+  }
+
+  // Fallback: parse free-form “Bidded …” or serial lines
+  const players = rows.map((r, i) => {
+    const line = r.join(" ").trim();
+    let name =
+      (line.match(/bidded\s+([^,0-9][^,]+)/i)?.[1] || "") ||
+      (line.match(/^\s*\d+\s*[\.\-]?\s*([A-Za-z][A-Za-z\s.'-]{2,})/)?.[1] || "");
+    name = name.trim();
+    if (!name) name = `Player ${i + 1}`;
+
+    const nums = [...line.matchAll(/(\d{3,4})/g)].map(m => Number(m[1]));
+    const base = nums.length ? nums[nums.length - 1] : 500;
+
+    return {
+      id: String(i + 1),
+      name,
+      base,
+      category: "",
+      rank: i + 1,
+      role: "",
+      status: "new",
+    };
+  });
+  return players;
+}
 
 /* ===========================
    CSV Import (URL + Paste)
@@ -467,7 +575,7 @@ function wireCsvImportUI() {
 
   const setMsg = (t) => { if (msgEl) msgEl.textContent = t; };
 
-  // Fetch CSV
+  // Fetch CSV from Google Sheets (published-to-web CSV)
   if (btnFetch && urlEl) {
     btnFetch.onclick = null;
     btnFetch.addEventListener("click", async () => {
@@ -487,7 +595,7 @@ function wireCsvImportUI() {
     });
   }
 
-  // Import CSV (with fallback for notes-style rows)
+  // Import from textarea using robust parser
   if (btnImport && pasteEl) {
     btnImport.onclick = null;
     btnImport.addEventListener("click", () => {
@@ -496,65 +604,27 @@ function wireCsvImportUI() {
         const raw = (pasteEl.value || "").trim();
         if (!raw) { setMsg("Paste CSV data first or use Fetch CSV."); return; }
 
-        const rows = raw.split(/\r?\n/).filter(Boolean);
-        if (!rows.length) { setMsg("No rows detected."); return; }
+        const players = parseCSVPlayers(raw);
+        if (!players.length) { setMsg("No players detected. Check header row or paste raw lines."); return; }
 
-        const first = rows[0].toLowerCase();
-        const headerLike = /(^|,)\s*(name|rank|base|category|role)\s*(,|$)/.test(first);
-
-        const toNumLocal = (v, d=0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
-        let players = [];
-
-        if (headerLike) {
-          const header = rows.shift().split(",").map(h => h.trim().toLowerCase());
-          const idx = n => header.indexOf(n);
-          const idI=idx("id"), nameI=idx("name"), baseI=idx("base"), catI=idx("category"), rankI=idx("rank"), roleI=idx("role");
-
-          players = rows.map((r,i)=>{
-            const c=r.split(",");
-            return {
-              id: (idI>=0?c[idI]:String(i+1)).trim(),
-              name: (nameI>=0?c[nameI]:`Player ${i+1}`).trim(),
-              base: toNumLocal(baseI>=0?c[baseI]:500),
-              category: (catI>=0?c[catI]:"").trim(),
-              rank: toNumLocal(rankI>=0?c[rankI]:i+1),
-              role: (roleI>=0?c[roleI]:"").trim(),
-              status: "new",
-            };
-          });
-        } else {
-          // Fallback for lines like “81.Bidded Syam Madhusoodanan …”
-          players = rows.map((r,i)=>{
-            let name = (r.match(/bidded\s+([^,0-9][^,]*)/i)?.[1] || "").trim();
-            if (!name) {
-              const m = r.match(/\d+\.\s*([A-Za-z][A-Za-z\s\.']{2,})/);
-              name = (m?.[1] || `Player ${i+1}`).trim();
-            }
-            const nums = [...r.matchAll(/(\d{3,4})/g)].map(x => Number(x[1]));
-            const base = nums.length ? nums[nums.length-1] : 500;
-
-            return { id:String(i+1), name, base, category:"", rank:i+1, role:"", status:"new" };
-          });
-        }
-
-        // Save & render
         state.players = players;
-        state.playersNeeded = state.playersNeeded || 15;
-        state.totalPoints = state.totalPoints || 15000;
+        // Keep your configured totals if already set; otherwise default
+        state.playersNeeded    = state.playersNeeded || 15;
+        state.totalPoints      = state.totalPoints   || 15000;
         state.minBasePerPlayer = state.minBasePerPlayer || 500;
         persist();
 
         render();
         setMsg(`Imported ${players.length} players.`);
-        $("playersList")?.scrollIntoView({ behavior:"smooth", block:"start" });
+        document.getElementById("playersList")?.scrollIntoView({ behavior:"smooth", block:"start" });
       } catch (e) {
         console.error("Import failed:", e);
-        setMsg("Import failed. Check console for details.");
+        setMsg("Import failed. See console for details.");
       }
     });
   }
 
-  // Clear buttons
+  // Clear helpers
   if (btnClearUrl && urlEl) {
     btnClearUrl.onclick = null;
     btnClearUrl.addEventListener("click", () => { urlEl.value = ""; setMsg(""); });
