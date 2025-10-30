@@ -876,9 +876,14 @@ async function wirePassPanelForPlayer(p) {
   const passPanel = document.getElementById("passPanel");
   if (passPanel) passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
 });
+await wirePassPanelForPlayer(p);
 
 
-  document.getElementById("btn-skip")?.addEventListener("click", ()=> nextPlayer());
+ document.getElementById("btn-pass")?.addEventListener("click", () => {
+  const passPanel = document.getElementById("passPanel");
+  if (passPanel) passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
 }
 
 function renderSelectedList(){
