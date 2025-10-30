@@ -173,6 +173,32 @@
         <div class="list" id="playersList"></div>
       </section>
     </main>
+<!-- ADD CLUB (Minimal) -->
+<section class="card">
+  <h2>Add Club (Minimal)</h2>
+  <div class="form-grid">
+    <label> Club name
+      <input id="club-name" placeholder="Coastal Strikers" />
+    </label>
+    <label> Logo URL (optional)
+      <input id="club-logo" placeholder="https://…" />
+    </label>
+    <label> Starting Budget (points)
+      <input id="club-budget" type="number" placeholder="15000" />
+    </label>
+  </div>
+  <div class="row" style="margin-top:10px;">
+    <button id="btn-create-club" class="btn">Create Club</button>
+    <div id="club-create-msg" class="hint" style="margin-left:8px;"></div>
+  </div>
+</section>
+
+<!-- OTHER CLUBS LIVE SQUADS -->
+<section class="card">
+  <h2>Other Clubs — Live Squads</h2>
+  <p class="hint">Updates as you mark players “won” by other clubs.</p>
+  <div id="otherClubsPanel" class="grid"></div>
+</section>
 
     <footer class="footer">
       <span>Session is saved locally. Optional cloud sync via Supabase.</span>
