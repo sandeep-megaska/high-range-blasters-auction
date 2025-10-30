@@ -918,11 +918,7 @@ async function wirePassPanelForPlayer(p) {
   if (passPanel) passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
     
 });
-
-
-
-
-
+  await wirePassPanelForPlayer(p);
 }
 
 function renderSelectedList(){
