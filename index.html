@@ -9,11 +9,8 @@
 
 <body>
   <div id="app" class="page">
-
-    <!-- SINGLE HEADER (no duplicates) -->
     <header class="topbar">
       <div class="brand">
-        <!-- Use your svg or png here -->
         <img src="/assets/highrange.svg" alt="High Range Blasters" class="brand-logo" />
         <h1>High Range Blasters — Auction Assist</h1>
       </div>
@@ -24,7 +21,7 @@
       </div>
     </header>
 
-    <!-- LOGIN VIEW (shown first) -->
+    <!-- LOGIN -->
     <section id="loginView" class="card modal" style="display:none">
       <h2>Login</h2>
       <p class="hint">Enter your credentials to start the auction.</p>
@@ -42,10 +39,11 @@
       </div>
     </section>
 
-    <!-- PRE-BID SETTINGS (after login) -->
+    <!-- SETTINGS -->
     <section id="settingsView" class="card modal" style="display:none">
       <h2>Pre-Bid Settings</h2>
-      <p class="hint">Configure roster size and budget before bidding begins.</p>
+      <p class="hint">Configure roster size, budget and category base values. For multiple preselected players use:
+        <b>Name1=1200; Name2=900</b></p>
       <div class="form-grid">
         <label> Number of Players (max)
           <input type="number" id="cfgPlayersCap" placeholder="15" />
@@ -53,30 +51,51 @@
         <label> Overall Points
           <input type="number" id="cfgTotalPoints" placeholder="15000" />
         </label>
-        <label> Preselected Player (Name)
-          <input id="cfgPreName" placeholder="Exact name as in list (optional)" />
+
+        <label> Category 1 base (Rank 1–16)
+          <input type="number" id="cfgBaseC1" placeholder="1500" />
         </label>
-        <label> Preselected Player Bid Points
+        <label> Category 2 base (Rank 17–24)
+          <input type="number" id="cfgBaseC2" placeholder="1200" />
+        </label>
+        <label> Category 3 base (Rank 25–32)
+          <input type="number" id="cfgBaseC3" placeholder="900" />
+        </label>
+        <label> Category 4 base (Rank 33–40)
+          <input type="number" id="cfgBaseC4" placeholder="700" />
+        </label>
+        <label> Category 5 base (Rank >40)
+          <input type="number" id="cfgBaseC5" placeholder="500" />
+        </label>
+
+        <label> Guardrail min/base per remaining slot
+          <input type="number" id="cfgGuardMin" placeholder="(defaults to Cat 5)" />
+        </label>
+
+        <label> Preselected Player(s)
+          <input id="cfgPreName" placeholder="Name=1200; Name2=900 (or single name)" />
+        </label>
+        <label> Single Preselected Bid (if only one name)
           <input type="number" id="cfgPreBid" placeholder="e.g. 1200" />
         </label>
       </div>
+
       <div class="stats" style="margin-top:10px;">
         <div class="stat">
           <span>Available Score (after preselected deduction)</span>
           <b id="cfgAvailableScore">—</b>
         </div>
       </div>
+
       <div class="row" style="margin-top:10px;">
         <button id="btn-save-settings" class="btn">Save & Start</button>
         <div id="settingsError" class="hint" style="color:#dc2626;margin-left:8px;"></div>
       </div>
     </section>
-<p class="hint">You can enter multiple preselected players in the Name box like:
-<b>Name1=1200; Name2=850; Name3=600</b>. If you only enter one name, the points from the “Preselected Player Bid Points” field will be used.</p>
 
-    <!-- MAIN APP (hidden until settings saved) -->
+    <!-- APP -->
     <main id="appMain" class="grid" style="display:none">
-      <!-- LEFT: Controls -->
+      <!-- LEFT -->
       <section class="card">
         <h2>Auction Controls</h2>
         <div class="form-grid">
@@ -86,7 +105,7 @@
           <label> Players Needed
             <input type="number" id="playersNeeded" />
           </label>
-          <label> Min Base / Player
+          <label> Guardrail Min / Remaining Slot
             <input type="number" id="minBasePerPlayer" />
           </label>
           <div class="row">
@@ -114,29 +133,40 @@
 
           <label> Paste CSV
             <textarea id="csvPaste" rows="6"
-              placeholder="name,dob,alumni,age,category,role,grade,rating,base,batting_hand,is_wk"></textarea>
+              placeholder="name,rank,dob,alumni,age,rating10,role,base(optional),batting_hand,is_wk"></textarea>
           </label>
           <div class="row">
             <button id="btn-import" class="btn">Import</button>
             <button id="btn-clear-paste" class="btn btn-ghost">Clear</button>
           </div>
-
-          <p class="hint">
-            Tip: Google Sheets → File → Share → <b>Publish to the web</b> → CSV, then paste here.
-          </p>
         </div>
       </section>
 
-      <!-- MIDDLE: Live Bid + Selected Squad -->
+      <!-- MIDDLE -->
       <section class="card">
         <h2>Live Bid</h2>
-        <div id="liveBid"></div>
+
+        <!-- Start-a-bid typeahead -->
+        <div class="typeahead">
+          <label> Start Bid: type 3–4 letters, pick exact player
+            <input id="startName" placeholder="e.g. Rah, Ana, Var" autocomplete="off" />
+          </label>
+          <div id="startResults" class="ta-menu" style="display:none"></div>
+          <div class="row" style="margin-top:8px;">
+            <label style="flex:1">Seed/Base Value (from category or sheet)
+              <input type="number" id="seedBase" />
+            </label>
+            <button id="btn-start-bid" class="btn" style="align-self:flex-end">Set Active</button>
+          </div>
+        </div>
+
+        <div id="liveBid" style="margin-top:10px"></div>
 
         <h2 style="margin-top:14px">Selected Squad</h2>
         <div id="selectedList"></div>
       </section>
 
-      <!-- RIGHT: Players -->
+      <!-- RIGHT -->
       <section class="card">
         <h2>Players <small id="playersCount"></small></h2>
         <div id="complianceBar"></div>
@@ -145,11 +175,10 @@
     </main>
 
     <footer class="footer">
-      <span>Session is saved locally in your browser. Optional cloud sync via Supabase.</span>
+      <span>Session is saved locally. Optional cloud sync via Supabase.</span>
     </footer>
   </div>
 
-  <!-- IMPORTANT: keep ONLY script imports here (no HTML inside this tag) -->
   <script type="module">
     import "./assets/utils.js";
     import "./assets/constraints.js";
