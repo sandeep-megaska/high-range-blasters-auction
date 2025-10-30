@@ -977,3 +977,4 @@ function wireCreateClubUI() {
 document.addEventListener("DOMContentLoaded", () => {
   try { wireCreateClubUI(); } catch {}
 });
+await wirePassPanelForPlayer(p);
