@@ -1,11 +1,13 @@
-// assets/app.js — Full file
+// assets/app.js — Tournament edition (typeahead + ranks + category bases)
+
 import {
   STORAGE_KEY,
   SAMPLE_CSV,
   parseCSV,
   shuffle,
   csvExport,
-  toNum
+  toNum,
+  categoryFromRank
 } from "./utils.js";
 
 import {
@@ -19,146 +21,79 @@ import {
   loadConstraintsFromSupabase,
   loadSettingsFromSupabase
 } from "./supabaseClient.js";
-// --- Preselected parsing & application helpers ---
-function parsePreselectedInput(rawNameField, singleBidField) {
-  const s = (rawNameField || "").trim();
-  if (!s) return [];
 
-  // If user entered "Name1=1200; Name2=900" (or comma separated), parse pairs.
-  const looksLikeList = /[=;]/.test(s) || (s.includes(",") && s.includes("="));
-  if (looksLikeList) {
-    return s
-      .split(/[;,]/g)
-      .map(x => x.trim())
-      .filter(Boolean)
-      .map(pair => {
-        const [n, b] = pair.split("=").map(z => (z ?? "").trim());
-        return { name: n, bid: Number(b) || 0 };
-      })
-      .filter(x => x.name);
-  }
-  // Single name → use the single bid box
-  const singleBid = Number(singleBidField) || 0;
-  return [{ name: s, bid: singleBid }];
-}
-
-function applyPreselected(preList, players) {
-  // returns { playersUpdated, applied:[], missing:[] }
-  const applied = [];
-  const missing = [];
-  const next = players.map(p => ({ ...p })); // shallow clone
-
-  preList.forEach(entry => {
-    const target = next.find(
-      x => (x.name || "").trim().toLowerCase() === entry.name.trim().toLowerCase()
-    );
-    if (target) {
-      if (target.status !== "won") {
-        target.status = "won";
-        target.finalBid = Math.max(0, Number(entry.bid) || 0);
-        applied.push({ name: target.name, bid: target.finalBid });
-      } else {
-        // already won—leave as is
-        applied.push({ name: target.name, bid: target.finalBid || 0 });
-      }
-    } else {
-      missing.push(entry.name);
-    }
-  });
-
-  return { playersUpdated: next, applied, missing };
-}
-
-function reapplyPreselectedIfAny() {
-  const preList = parsePreselectedInput(
-    state.setup.preselectedName,
-    state.setup.preselectedBid
-  );
-  if (!preList.length) return;
-
-  const { playersUpdated } = applyPreselected(preList, state.players);
-  state.players = playersUpdated;
-}
-
-// ---------- Auth (hardcoded) ----------
+// -------- Auth ----------
 const AUTH_USER = "HRB";
 const AUTH_PASS = "sandeep";
 
-// ---------- Global state ----------
+// -------- State ----------
 let state = {
-  // app
+  // data
   players: [],
   queue: [],
-  totalPoints: 1000,
-  playersNeeded: 6,
-  minBasePerPlayer: 50,
+  totalPoints: 15000,
+  playersNeeded: 15,
+  minBasePerPlayer: 500, // guardrail per remaining slot (defaults to Cat5)
   activeId: null,
   log: [],
   constraints: DEFAULT_CONSTRAINTS,
 
-  // auth + setup
+  // categories (editable in settings)
+  catBase: { c1:1500, c2:1200, c3:900, c4:700, c5:500 },
+
+  // auth/setup
   auth: { loggedIn: false },
   setup: {
     done: false,
     playersCap: 15,
     overallPoints: 15000,
+    catBase: { c1:1500, c2:1200, c3:900, c4:700, c5:500 },
+    guardMin: 0, // 0 => auto from Cat5
     preselectedName: "",
     preselectedBid: 0
   }
 };
 
-// ---------- DOM refs ----------
-const $ = (sel) => document.querySelector(sel);
-
+// -------- DOM ----------
+const $ = s => document.querySelector(s);
 // Views
 const appMain = $("#appMain");
 const loginView = $("#loginView");
 const settingsView = $("#settingsView");
 
-// Login form
+// Login
 const loginUser = $("#loginUser");
 const loginPass = $("#loginPass");
 const loginError = $("#loginError");
 $("#btn-login")?.addEventListener("click", onLogin);
+$("#btn-logout")?.addEventListener("click", onLogout);
 
-// Settings form
+// Settings inputs
 const cfgPlayersCap = $("#cfgPlayersCap");
 const cfgTotalPoints = $("#cfgTotalPoints");
+const cfgBaseC1 = $("#cfgBaseC1");
+const cfgBaseC2 = $("#cfgBaseC2");
+const cfgBaseC3 = $("#cfgBaseC3");
+const cfgBaseC4 = $("#cfgBaseC4");
+const cfgBaseC5 = $("#cfgBaseC5");
+const cfgGuardMin = $("#cfgGuardMin");
 const cfgPreName = $("#cfgPreName");
 const cfgPreBid = $("#cfgPreBid");
 const cfgAvailableScore = $("#cfgAvailableScore");
 const settingsError = $("#settingsError");
 $("#btn-save-settings")?.addEventListener("click", onSaveSettings);
-[cfgPlayersCap, cfgTotalPoints, cfgPreBid]?.forEach(el => {
-  el?.addEventListener("input", updateAvailableScorePreview);
-});
+[cfgPlayersCap,cfgTotalPoints,cfgBaseC1,cfgBaseC2,cfgBaseC3,cfgBaseC4,cfgBaseC5,cfgGuardMin,cfgPreName,cfgPreBid]
+  .forEach(el => el?.addEventListener("input", updateAvailableScorePreview));
 
-// Header buttons
-$("#btn-logout")?.addEventListener("click", onLogout);
-$("#btn-export")?.addEventListener("click", () => exportWon());
-$("#btn-reset")?.addEventListener("click", () => {
-  localStorage.removeItem(STORAGE_KEY);
-  location.reload();
-});
-
-// Controls (left card)
-$("#totalPoints")?.addEventListener("change", e => {
-  state.totalPoints = toNum(e.target.value, 0);
-  persist(); render();
-});
-$("#playersNeeded")?.addEventListener("change", e => {
-  state.playersNeeded = toNum(e.target.value, 0);
-  persist(); render();
-});
-$("#minBasePerPlayer")?.addEventListener("change", e => {
-  state.minBasePerPlayer = toNum(e.target.value, 0);
-  persist(); render();
-});
+// Left controls
+$("#totalPoints")?.addEventListener("change", e => { state.totalPoints = toNum(e.target.value, state.totalPoints); persist(); render(); });
+$("#playersNeeded")?.addEventListener("change", e => { state.playersNeeded = toNum(e.target.value, state.playersNeeded); persist(); render(); });
+$("#minBasePerPlayer")?.addEventListener("change", e => { state.minBasePerPlayer = toNum(e.target.value, state.minBasePerPlayer); persist(); render(); });
 $("#btn-shuffle")?.addEventListener("click", () => randomizeQueue());
 $("#btn-next")?.addEventListener("click", () => nextPlayer());
 $("#btn-undo")?.addEventListener("click", () => undo());
 
-// Import/export (left card)
+// Import
 const csvUrlEl = $("#csvUrl");
 const csvPasteEl = $("#csvPaste");
 $("#btn-fetch")?.addEventListener("click", () => importFromCsvUrl());
@@ -166,135 +101,170 @@ $("#btn-clear-url")?.addEventListener("click", () => { csvUrlEl.value = ""; });
 $("#btn-import")?.addEventListener("click", () => importFromPaste());
 $("#btn-clear-paste")?.addEventListener("click", () => { csvPasteEl.value = ""; });
 
-// Right/Middle refs
-const liveBidEl = $("#liveBid");
-const playersListEl = $("#playersList");
-const playersCountEl = $("#playersCount");
+// Stats/Right/Middle
 const remainingPointsEl = $("#remainingPoints");
 const remainingSlotsEl = $("#remainingSlots");
 const guardrailEl = $("#guardrail");
+const playersListEl = $("#playersList");
+const playersCountEl = $("#playersCount");
 const complianceBarEl = $("#complianceBar");
+const liveBidEl = $("#liveBid");
+const selectedListEl = $("#selectedList");
 
-// ---------- Init ----------
+// Typeahead
+const startNameEl = $("#startName");
+const startResultsEl = $("#startResults");
+const seedBaseEl = $("#seedBase");
+const btnStartBid = $("#btn-start-bid");
+startNameEl?.addEventListener("input", onTypeahead);
+btnStartBid?.addEventListener("click", onSetActiveFromTypeahead);
+
+// Header buttons
+$("#btn-export")?.addEventListener("click", () => exportWon());
+$("#btn-reset")?.addEventListener("click", () => { localStorage.removeItem(STORAGE_KEY); location.reload(); });
+
+// -------- Init ----------
 load();
-routeViews();     // decide which view to show
-if (state.auth.loggedIn && state.setup.done) {
-  render();
-  warmloadSupabase();
-}
+routeViews();
+if (state.auth.loggedIn && state.setup.done) { render(); warmloadSupabase(); }
 
-// ---------- View routing ----------
+// -------- Routing ----------
 function routeViews(){
   const logged = !!state.auth.loggedIn;
   const setupDone = !!state.setup.done;
-
-  // Logout button visibility
-  const logoutBtn = $("#btn-logout");
-  if (logoutBtn) logoutBtn.style.display = logged ? "inline-block" : "none";
+  $("#btn-logout").style.display = logged ? "inline-block" : "none";
 
   if (!logged) {
     show(loginView); hide(settingsView); hide(appMain);
-    // Default credentials prefill (optional)
-    if (loginUser) loginUser.value = AUTH_USER;
-    if (loginPass) loginPass.value = AUTH_PASS;
-    loginError.textContent = "";
+    loginUser.value = AUTH_USER; loginPass.value = AUTH_PASS; loginError.textContent = "";
     return;
   }
-  if (logged && !setupDone) {
-    // Prefill settings with saved or sensible defaults
-    if (cfgPlayersCap) cfgPlayersCap.value = state.setup.playersCap ?? 15;
-    if (cfgTotalPoints) cfgTotalPoints.value = state.setup.overallPoints ?? 15000;
-    if (cfgPreName) cfgPreName.value = state.setup.preselectedName ?? "";
-    if (cfgPreBid) cfgPreBid.value = state.setup.preselectedBid ?? 0;
+  if (logged && !setupDone){
+    // Prefill
+    cfgPlayersCap.value = state.setup.playersCap;
+    cfgTotalPoints.value = state.setup.overallPoints;
+    cfgBaseC1.value = state.setup.catBase.c1;
+    cfgBaseC2.value = state.setup.catBase.c2;
+    cfgBaseC3.value = state.setup.catBase.c3;
+    cfgBaseC4.value = state.setup.catBase.c4;
+    cfgBaseC5.value = state.setup.catBase.c5;
+    cfgGuardMin.value = state.setup.guardMin || "";
+    cfgPreName.value = state.setup.preselectedName || "";
+    cfgPreBid.value = state.setup.preselectedBid || 0;
     updateAvailableScorePreview();
     show(settingsView); hide(loginView); hide(appMain);
     return;
   }
-  // logged + setup done
   show(appMain); hide(loginView); hide(settingsView);
 }
-
 function show(el){ if (el) el.style.display = ""; }
 function hide(el){ if (el) el.style.display = "none"; }
 
-// ---------- Auth handlers ----------
+// -------- Auth ----------
 function onLogin(){
-  const u = (loginUser?.value || "").trim();
-  const p = (loginPass?.value || "").trim();
+  const u = (loginUser.value || "").trim();
+  const p = (loginPass.value || "").trim();
   if (u === AUTH_USER && p === AUTH_PASS) {
-    state.auth.loggedIn = true;
-    persist();
-    routeViews();
+    state.auth.loggedIn = true; persist(); routeViews();
   } else {
-    if (loginError) loginError.textContent = "Invalid username or password.";
+    loginError.textContent = "Invalid username or password.";
   }
 }
-function onLogout(){
-  // Keep players/settings if you want; here we just flip auth
-  state.auth.loggedIn = false;
-  persist();
-  routeViews();
+function onLogout(){ state.auth.loggedIn = false; persist(); routeViews(); }
+
+// -------- Preselected helpers ----------
+function parsePreselectedInput(rawNameField, singleBidField) {
+  const s = (rawNameField || "").trim();
+  if (!s) return [];
+  const looksLikeList = /[=;]/.test(s) || (s.includes(",") && s.includes("="));
+  if (looksLikeList) {
+    return s.split(/[;,]/g).map(x => x.trim()).filter(Boolean).map(pair => {
+      const [n, b] = pair.split("=").map(z => (z ?? "").trim());
+      return { name: n, bid: Number(b) || 0 };
+    }).filter(x => x.name);
+  }
+  return [{ name: s, bid: Number(singleBidField) || 0 }];
+}
+function applyPreselected(preList, players) {
+  const applied = []; const missing = [];
+  const next = players.map(p => ({ ...p }));
+  preList.forEach(entry => {
+    const target = next.find(x => (x.name || "").trim().toLowerCase() === entry.name.trim().toLowerCase());
+    if (target) {
+      if (target.status !== "won") { target.status="won"; target.finalBid = Math.max(0, Number(entry.bid)||0); }
+      applied.push({ name: target.name, bid: target.finalBid||0 });
+    } else missing.push(entry.name);
+  });
+  return { playersUpdated: next, applied, missing };
+}
+function reapplyPreselectedIfAny() {
+  const preList = parsePreselectedInput(state.setup.preselectedName, state.setup.preselectedBid);
+  if (!preList.length) return;
+  const { playersUpdated } = applyPreselected(preList, state.players);
+  state.players = playersUpdated;
 }
 
-// ---------- Settings handlers ----------
+// -------- Settings ----------
 function updateAvailableScorePreview(){
-  const total = toNum(cfgTotalPoints?.value, 15000);
-  const preList = parsePreselectedInput(cfgPreName?.value, cfgPreBid?.value);
+  const total = toNum(cfgTotalPoints.value, 15000);
+  const preList = parsePreselectedInput(cfgPreName.value, cfgPreBid.value);
   const preTotal = preList.reduce((t, x) => t + Math.max(0, Number(x.bid) || 0), 0);
-  if (cfgAvailableScore) cfgAvailableScore.textContent = Math.max(0, total - preTotal);
+  cfgAvailableScore.textContent = Math.max(0, total - preTotal);
 }
-
-
 function onSaveSettings(){
   settingsError.textContent = "";
+  const playersCap = toNum(cfgPlayersCap.value, 15);
+  const overallPoints = toNum(cfgTotalPoints.value, 15000);
+  const catBase = {
+    c1: toNum(cfgBaseC1.value, 1500),
+    c2: toNum(cfgBaseC2.value, 1200),
+    c3: toNum(cfgBaseC3.value, 900),
+    c4: toNum(cfgBaseC4.value, 700),
+    c5: toNum(cfgBaseC5.value, 500),
+  };
+  const guardMin = toNum(cfgGuardMin.value, 0);
+  const preName = (cfgPreName.value || "").trim();
+  const preBid = toNum(cfgPreBid.value, 0);
 
-  const playersCap = toNum(cfgPlayersCap?.value, 15);
-  const overallPoints = toNum(cfgTotalPoints?.value, 15000);
-  const preNameRaw = (cfgPreName?.value || "").trim();
-  const preBidRaw = toNum(cfgPreBid?.value, 0);
+  if (playersCap <= 0 || overallPoints <= 0) { settingsError.textContent = "Enter positive values for players and points."; return; }
 
-  if (playersCap <= 0 || overallPoints <= 0) {
-    settingsError.textContent = "Enter positive values for players and points.";
-    return;
-  }
-  if (preBidRaw < 0) {
-    settingsError.textContent = "Preselected bid cannot be negative.";
-    return;
-  }
-
-  // Store setup
   state.setup.playersCap = playersCap;
   state.setup.overallPoints = overallPoints;
-  state.setup.preselectedName = preNameRaw;
-  state.setup.preselectedBid = preBidRaw;
+  state.setup.catBase = catBase;
+  state.setup.guardMin = guardMin;
+  state.setup.preselectedName = preName;
+  state.setup.preselectedBid = preBid;
   state.setup.done = true;
 
-  // Map to working controls
-  state.totalPoints = overallPoints;
   state.playersNeeded = playersCap;
+  state.totalPoints = overallPoints;
+  state.catBase = { ...catBase };
+  state.minBasePerPlayer = guardMin > 0 ? guardMin : catBase.c5;
 
-  // Apply preselected now (on current list; will reapply after CSV import too)
-  const preList = parsePreselectedInput(preNameRaw, preBidRaw);
+  // Inject category base into players if base is blank/0
+  state.players = state.players.map(p => {
+    const c = p.category || categoryFromRank(p.rank);
+    const catBaseVal = c===1?catBase.c1:c===2?catBase.c2:c===3?catBase.c3:c===4?catBase.c4:catBase.c5;
+    return { ...p, category: c, base: p.base>0 ? p.base : catBaseVal };
+  });
+
+  // Apply preselected
+  const preList = parsePreselectedInput(preName, preBid);
   if (preList.length) {
     const { playersUpdated, missing } = applyPreselected(preList, state.players);
     state.players = playersUpdated;
-    if (missing.length) {
-      settingsError.textContent = `Note: not found in current list → ${missing.join(", ")}. They will be rechecked after you import the master sheet.`;
-    }
+    if (missing.length) settingsError.textContent = `Not found (will recheck after CSV import): ${missing.join(", ")}`;
   }
 
-  persist();
-  routeViews();
-  render();
+  persist(); routeViews(); render();
 }
 
-// ---------- Load / Save ----------
+// -------- Load / Save ----------
 function load(){
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) state = { ...state, ...JSON.parse(raw) };
-    // Always ensure players exist
-    if (!state.players || !Array.isArray(state.players) || state.players.length === 0){
+    if (!state.players || !state.players.length){
       state.players = parseCSV(SAMPLE_CSV);
       state.queue = shuffle(state.players.map(p=>p.id));
       state.activeId = null;
@@ -304,14 +274,11 @@ function load(){
     state.queue = shuffle(state.players.map(p=>p.id));
     state.activeId = null;
   }
-
-  // Reflect to left-card inputs (when visible)
-  const tp = $("#totalPoints"), pn = $("#playersNeeded"), mb = $("#minBasePerPlayer");
-  if (tp) tp.value = state.totalPoints;
-  if (pn) pn.value = state.playersNeeded;
-  if (mb) mb.value = state.minBasePerPlayer;
+  // reflect controls
+  $("#totalPoints").value = state.totalPoints;
+  $("#playersNeeded").value = state.playersNeeded;
+  $("#minBasePerPlayer").value = state.minBasePerPlayer;
 }
-
 async function warmloadSupabase(){
   const team = "high-range-blasters";
   try {
@@ -319,147 +286,154 @@ async function warmloadSupabase(){
     if (s) {
       state.totalPoints = s.total_points ?? state.totalPoints;
       state.playersNeeded = s.players_needed ?? state.playersNeeded;
-      state.minBasePerPlayer = s.min_base_per_player ?? state.minBasePerPlayer;
       $("#totalPoints").value = state.totalPoints;
       $("#playersNeeded").value = state.playersNeeded;
-      $("#minBasePerPlayer").value = state.minBasePerPlayer;
     }
     const c = await loadConstraintsFromSupabase(team);
     if (c && c.length) state.constraints = c;
     persist(); render();
-  } catch { /* ignore */ }
+  } catch {}
 }
-
 function persist(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
 
-// ---------- Derived ----------
-function remainingSlots(){
-  const won = state.players.filter(p => p.status === "won").length;
-  return Math.max(0, state.playersNeeded - won);
-}
-function spentPoints(){
-  return state.players.reduce((t, p) => t + (p.status === "won" ? (p.finalBid || 0) : 0), 0);
-}
-function remainingPoints(){
-  return Math.max(0, state.totalPoints - spentPoints());
-}
-function guardrailOK(afterSpend = 0){
+// -------- Derived ----------
+function remainingSlots(){ return Math.max(0, state.playersNeeded - state.players.filter(p=>p.status==="won").length); }
+function spentPoints(){ return state.players.reduce((t,p)=>t + (p.status==="won"?(p.finalBid||0):0),0); }
+function remainingPoints(){ return Math.max(0, state.totalPoints - spentPoints()); }
+function guardrailOK(afterSpend=0){
   const remAfter = remainingPoints() - afterSpend;
-  const slotsAfter = Math.max(0, remainingSlots() - (afterSpend > 0 ? 1 : 0));
+  const slotsAfter = Math.max(0, remainingSlots() - (afterSpend>0?1:0));
   return remAfter >= (slotsAfter * state.minBasePerPlayer);
 }
 
-// ---------- Queue / actions ----------
+// -------- Queue / Actions ----------
 function randomizeQueue(){
-  const ids = state.players.filter(p => p.status === "pending").map(p => p.id);
-  state.queue = shuffle(ids);
-  state.activeId = null;
-  persist(); render();
+  const ids = state.players.filter(p=>p.status==="pending").map(p=>p.id);
+  state.queue = shuffle(ids); state.activeId=null; persist(); render();
 }
 function nextPlayer(){
   if (!state.queue.length){ randomizeQueue(); return; }
-  const [head, ...rest] = state.queue;
-  state.queue = rest;
-  state.activeId = head;
-  persist(); render();
+  const [head,...rest] = state.queue; state.queue=rest; state.activeId=head; persist(); render();
 }
-function markWon(id, bid){
-  state.players = state.players.map(p => p.id===id ? { ...p, status:"won", finalBid: bid } : p);
-  state.log.push({ type:"won", id, bid });
-  state.activeId = null;
-  persist(); render();
+function markWon(id,bid){
+  state.players = state.players.map(p=>p.id===id?{...p,status:"won",finalBid:bid}:p);
+  state.log.push({type:"won",id,bid}); state.activeId=null; persist(); render();
 }
 function markLost(id){
-  state.players = state.players.map(p => p.id===id ? { ...p, status:"lost", finalBid: undefined } : p);
-  state.log.push({ type:"lost", id });
-  state.activeId = null;
-  persist(); render();
+  state.players = state.players.map(p=>p.id===id?{...p,status:"lost",finalBid:undefined}:p);
+  state.log.push({type:"lost",id}); state.activeId=null; persist(); render();
 }
 function undo(){
-  const last = state.log.pop();
-  if (!last) return;
-  if (last.type === "won"){
-    state.players = state.players.map(p => p.id===last.id ? { ...p, status:"pending", finalBid: undefined } : p);
+  const last = state.log.pop(); if (!last) return;
+  if (last.type==="won"){
+    state.players = state.players.map(p=>p.id===last.id?{...p,status:"pending",finalBid:undefined}:p);
   } else {
-    state.players = state.players.map(p => p.id===last.id ? { ...p, status:"pending" } : p);
+    state.players = state.players.map(p=>p.id===last.id?{...p,status:"pending"}:p);
   }
   persist(); render();
 }
-function updatePlayer(id, patch){
-  state.players = state.players.map(p => p.id===id ? { ...p, ...patch } : p);
-  persist(); render();
-}
+function updatePlayer(id, patch){ state.players = state.players.map(p=>p.id===id?{...p,...patch}:p); persist(); render(); }
 
-// ---------- Import / Export ----------
+// -------- Import / Export ----------
 async function importFromCsvUrl(){
-  const url = (csvUrlEl?.value || "").trim();
-  if (!url) { alert("CSV URL is empty."); return; }
+  const url = (csvUrlEl?.value||"").trim();
+  if (!url){ alert("CSV URL is empty."); return; }
   try {
-    const res = await fetch(url);
-    const txt = await res.text();
-    const arr = parseCSV(txt);
-    if (!arr.length) { alert("No rows found in CSV."); return; }
-    state.players = arr;
-    // Re-apply any preselected to the newly imported list
+    const res = await fetch(url); const txt = await res.text(); const arr = parseCSV(txt);
+    if (!arr.length){ alert("No rows found in CSV."); return; }
+    state.players = arr.map(p=>{
+      const c = p.category || categoryFromRank(p.rank);
+      const baseVal = c===1?state.catBase.c1:c===2?state.catBase.c2:c===3?state.catBase.c3:c===4?state.catBase.c4:state.catBase.c5;
+      return { ...p, category:c, base: p.base>0?p.base:baseVal };
+    });
     reapplyPreselectedIfAny();
-
     state.queue = shuffle(state.players.filter(p=>p.status==="pending").map(p=>p.id));
-    state.activeId = null;
-    persist(); render();
-  } catch (e){
-    alert("Failed to fetch CSV: " + e);
-  }
+    state.activeId = null; persist(); render();
+  } catch(e){ alert("Failed to fetch CSV: "+e); }
 }
 function importFromPaste(){
-  const txt = (csvPasteEl?.value || "").trim();
-  if (!txt) { alert("Paste CSV is empty."); return; }
+  const txt = (csvPasteEl?.value||"").trim();
+  if (!txt){ alert("Paste CSV is empty."); return; }
   try {
     const arr = parseCSV(txt);
-    if (!arr.length) { alert("No rows found in CSV."); return; }
-    state.players = arr;
-    // Re-apply any preselected to the newly pasted list
+    if (!arr.length){ alert("No rows found in CSV."); return; }
+    state.players = arr.map(p=>{
+      const c = p.category || categoryFromRank(p.rank);
+      const baseVal = c===1?state.catBase.c1:c===2?state.catBase.c2:c===3?state.catBase.c3:c===4?state.catBase.c4:state.catBase.c5;
+      return { ...p, category:c, base: p.base>0?p.base:baseVal };
+    });
     reapplyPreselectedIfAny();
-
     state.queue = shuffle(state.players.filter(p=>p.status==="pending").map(p=>p.id));
-    state.activeId = null;
-    persist(); render();
-  } catch (e){
-    alert("Parse error: " + e);
-  }
+    state.activeId = null; persist(); render();
+  } catch(e){ alert("Parse error: "+e); }
 }
 function exportWon(){
-  const won = state.players.filter(p => p.status === "won");
-  if (!won.length) { alert("No players won yet."); return; }
-  const rows = won.map(p => ({
-    name: p.name,
-    role: p.role,
-    grade: p.grade,
-    rating: p.rating,
-    finalBid: p.finalBid,
-    alumni: p.alumni || "",
-    age: p.age || "",
-    category: p.category || ""
+  const won = state.players.filter(p=>p.status==="won");
+  if (!won.length){ alert("No players won yet."); return; }
+  const rows = won.map(p=>({
+    name:p.name, rank:p.rank, category:p.category, role:p.role,
+    rating10:p.rating10, finalBid:p.finalBid, alumni:p.alumni||"", age:p.age||""
   }));
   const csv = csvExport(rows);
-  const blob = new Blob([csv], {type:"text/csv"});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = "hrb_roster.csv"; a.click();
-  URL.revokeObjectURL(url);
+  const blob = new Blob([csv],{type:"text/csv"}); const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href=url; a.download="hrb_roster.csv"; a.click(); URL.revokeObjectURL(url);
 }
 
-// ---------- Rendering ----------
+// -------- Typeahead (Start Bid) ----------
+function onTypeahead(){
+  const q = (startNameEl.value||"").trim().toLowerCase();
+  if (q.length < 3){ startResultsEl.style.display="none"; startResultsEl.innerHTML=""; return; }
+  const matches = state.players
+    .filter(p => p.status==="pending" && (p.name||"").toLowerCase().includes(q))
+    .sort((a,b)=>a.rank-b.rank)
+    .slice(0,12);
+  if (!matches.length){ startResultsEl.style.display="none"; startResultsEl.innerHTML=""; return; }
+  const list = document.createElement("div"); list.className = "ta-list";
+  list.innerHTML = matches.map(p=>{
+    const cat = p.category || categoryFromRank(p.rank);
+    return `<div class="ta-item" data-id="${p.id}">
+      <b>${p.name}</b> <span class="ta-muted">#${p.rank} · Cat ${cat} · ${p.role}</span>
+    </div>`;
+  }).join("");
+  startResultsEl.innerHTML = ""; startResultsEl.appendChild(list);
+  startResultsEl.style.display = "";
+  list.querySelectorAll(".ta-item").forEach(el=>{
+    el.addEventListener("click", ()=>{
+      const id = el.getAttribute("data-id");
+      const p = state.players.find(x=>x.id===id);
+      if (!p) return;
+      state.activeId = p.id;
+      const cat = p.category || categoryFromRank(p.rank);
+      const baseVal = p.base>0 ? p.base :
+        (cat===1?state.catBase.c1:cat===2?state.catBase.c2:cat===3?state.catBase.c3:cat===4?state.catBase.c4:state.catBase.c5);
+      seedBaseEl.value = baseVal;
+      startResultsEl.style.display="none"; startResultsEl.innerHTML="";
+      persist(); render();
+    });
+  });
+}
+function onSetActiveFromTypeahead(){
+  const q = (startNameEl.value||"").trim().toLowerCase();
+  const p = state.players.find(x => x.status==="pending" && (x.name||"").toLowerCase()===q);
+  if (!p){ alert("Pick from dropdown first (click on the exact player)."); return; }
+  state.activeId = p.id;
+  const cat = p.category || categoryFromRank(p.rank);
+  const baseVal = p.base>0 ? p.base :
+    (cat===1?state.catBase.c1:cat===2?state.catBase.c2:cat===3?state.catBase.c3:cat===4?state.catBase.c4:state.catBase.c5);
+  seedBaseEl.value = baseVal;
+  persist(); render();
+}
+
+// -------- Render ----------
 function render(){
-  if (!appMain || appMain.style.display === "none") return;
+  if (!appMain || appMain.style.display==="none") return;
 
-  if (remainingPointsEl) remainingPointsEl.textContent = remainingPoints();
-  if (remainingSlotsEl) remainingSlotsEl.textContent = remainingSlots();
-  if (guardrailEl) {
-    guardrailEl.classList.toggle("danger", !guardrailOK(0));
-    guardrailEl.innerHTML = `Guardrail: <b>${guardrailOK(0) ? "OK" : "At Risk"}</b>`;
-  }
+  remainingPointsEl.textContent = remainingPoints();
+  remainingSlotsEl.textContent = remainingSlots();
+  guardrailEl.classList.toggle("danger", !guardrailOK(0));
+  guardrailEl.innerHTML = `Guardrail: <b>${guardrailOK(0) ? "OK" : "At Risk"}</b>`;
 
-  if (playersCountEl) playersCountEl.textContent = `(${state.players.length})`;
+  playersCountEl.textContent = `(${state.players.length})`;
   renderCompliance();
   renderPlayersList();
   renderLiveBid();
@@ -467,7 +441,6 @@ function render(){
 }
 
 function renderCompliance(){
-  if (!complianceBarEl) return;
   const c = evaluateRosterCompliance(state.players, state.constraints);
   const ok = c.allMinOk;
   complianceBarEl.className = "compliance " + (ok ? "ok" : "warn");
@@ -486,14 +459,8 @@ function renderCompliance(){
 }
 
 function renderPlayersList(){
-  if (!playersListEl) return;
   playersListEl.innerHTML = "";
-
-  const withScores = state.players.map(p => ({
-    ...p,
-    valueScore: computeValueScore(p, state.players, state.constraints)
-  }));
-
+  const withScores = state.players.map(p => ({ ...p, valueScore: computeValueScore(p, state.players, state.constraints) }));
   withScores.forEach(p => {
     const tier = tierFromScore(p.valueScore);
     const div = document.createElement("div");
@@ -504,12 +471,9 @@ function renderPlayersList(){
         <div class="${tier.class}"><span>${tier.label}</span><span>•</span><span>${p.valueScore.toFixed(1)}</span></div>
       </div>
       <div class="meta">
-        ${p.role} • Grade ${p.grade} • Rating ${p.rating} • Base ${p.base}
-        ${p.is_wk ? " • WK" : ""}
-        ${p.batting_hand ? " • " + p.batting_hand + "-hand" : ""}
-        ${p.category ? " • " + p.category : ""}
-        ${p.alumni ? " • " + p.alumni : ""}
-        ${p.age ? " • Age " + p.age : ""}
+        #${p.rank} • Cat ${p.category} • ${p.role} • Rating10 ${p.rating10 ?? 0} • Base ${p.base}
+        ${p.is_wk ? " • WK" : ""}${p.batting_hand ? " • " + p.batting_hand + "-hand" : ""}
+        ${p.alumni ? " • " + p.alumni : ""}${p.age ? " • Age " + p.age : ""}
       </div>
       <div class="row" style="margin-top:6px;">
         <button class="btn btn-ghost" data-action="set-active">Set Active</button>
@@ -518,74 +482,46 @@ function renderPlayersList(){
       </div>
       <div class="info-grid" style="margin-top:6px;">
         <label class="info"><div class="k">Base</div><input data-edit="base" value="${p.base}" /></label>
-        <label class="info"><div class="k">Rating</div><input data-edit="rating" value="${p.rating}" /></label>
-        <label class="info"><div class="k">Grade</div><input data-edit="grade" value="${p.grade}" /></label>
+        <label class="info"><div class="k">Rating10</div><input data-edit="rating10" value="${p.rating10 ?? 0}" /></label>
+        <label class="info"><div class="k">Role</div><input data-edit="role" value="${p.role}" /></label>
       </div>
     `;
-
-    div.querySelector("[data-action='set-active']")?.addEventListener("click", () => {
-      state.activeId = p.id; persist(); render();
-    });
+    div.querySelector("[data-action='set-active']")?.addEventListener("click", () => { state.activeId = p.id; seedBaseEl.value = p.base; persist(); render(); });
     div.querySelector("[data-action='mark-lost']")?.addEventListener("click", () => markLost(p.id));
-    div.querySelector("[data-action='reopen']")?.addEventListener("click", () =>
-      updatePlayer(p.id, { status:"pending", finalBid: undefined })
-    );
+    div.querySelector("[data-action='reopen']")?.addEventListener("click", () => updatePlayer(p.id, { status:"pending", finalBid: undefined }));
 
-    div.querySelector("[data-edit='base']")?.addEventListener("change", e =>
-      updatePlayer(p.id, { base: toNum(e.target.value, p.base) })
-    );
-    div.querySelector("[data-edit='rating']")?.addEventListener("change", e =>
-      updatePlayer(p.id, { rating: toNum(e.target.value, p.rating) })
-    );
-    div.querySelector("[data-edit='grade']")?.addEventListener("change", e =>
-      updatePlayer(p.id, { grade: String(e.target.value || p.grade).toUpperCase() })
-    );
+    div.querySelector("[data-edit='base']")?.addEventListener("change", e => updatePlayer(p.id, { base: toNum(e.target.value, p.base) }));
+    div.querySelector("[data-edit='rating10']")?.addEventListener("change", e => updatePlayer(p.id, { rating10: toNum(e.target.value, p.rating10) }));
+    div.querySelector("[data-edit='role']")?.addEventListener("change", e => updatePlayer(p.id, { role: String(e.target.value||p.role) }));
 
     playersListEl.appendChild(div);
   });
 }
 
-function renderLiveBid() {
-  if (!liveBidEl) return;
+function renderLiveBid(){
   const p = state.players.find(x => x.id === state.activeId);
-  if (!p) {
-    liveBidEl.innerHTML = `<div class="hint">No active player. Click <b>Next Player</b> to start.</div>`;
-    return;
-  }
+  if (!p) { liveBidEl.innerHTML = `<div class="hint">Pick a player via Start Bid above or click <b>Next Player</b>.</div>`; return; }
 
   const score = computeValueScore(p, state.players, state.constraints);
   const tier = tierFromScore(score);
 
-  const basicMeta = [
-    p.role,
-    `Grade ${p.grade}`,
-    `Rating ${p.rating}`,
-    p.is_wk ? "WK" : null,
-    p.batting_hand ? `${p.batting_hand}-hand` : null
-  ].filter(Boolean).join(" • ");
-
-  const extraMeta = [
-    p.category ? `Category: ${p.category}` : null,
-    p.alumni ? `Alumni: ${p.alumni}` : null,
-    p.dob ? `DOB: ${p.dob}` : null,
-    (p.age ? `Age: ${p.age}` : null)
-  ].filter(Boolean).join(" • ");
+  const basic = [`#${p.rank} · Cat ${p.category}`, p.role, `Rating10 ${p.rating10 ?? 0}`, p.is_wk?"WK":null, p.batting_hand?`${p.batting_hand}-hand`:null]
+    .filter(Boolean).join(" • ");
+  const extra = [p.alumni?`Alumni: ${p.alumni}`:null, p.dob?`DOB: ${p.dob}`:null, p.age?`Age: ${p.age}`:null].filter(Boolean).join(" • ");
 
   liveBidEl.innerHTML = `
     <div class="item">
       <div class="title">
         <div>
           <div style="font-size:18px;font-weight:600">${p.name}</div>
-          <div class="meta">${basicMeta}</div>
-          ${extraMeta ? `<div class="meta" style="margin-top:2px">${extraMeta}</div>` : ``}
+          <div class="meta">${basic}</div>
+          ${extra ? `<div class="meta" style="margin-top:2px">${extra}</div>` : ``}
         </div>
-        <div class="${tier.class}">
-          <span>${tier.label}</span><span>•</span><span>${score.toFixed(1)}</span>
-        </div>
+        <div class="${tier.class}"><span>${tier.label}</span><span>•</span><span>${score.toFixed(1)}</span></div>
       </div>
 
       <div class="info-grid" style="margin-top:8px;">
-        <div class="info"><div class="k">Base</div><div class="v">${p.base}</div></div>
+        <div class="info"><div class="k">Base (cat/sheet)</div><div class="v">${p.base}</div></div>
         <div class="info"><div class="k">Value Score</div><div class="v">${score.toFixed(1)}</div></div>
       </div>
 
@@ -613,56 +549,31 @@ function renderLiveBid() {
   function validate(){
     const bid = toNum(bidInput.value, p.base);
     const ok = guardrailOK(bid);
-    warn.textContent = ok ? "" : `Bid violates guardrail: keep ≥ ${Math.max(0, (remainingSlots()-1)*state.minBasePerPlayer)} after this pick.`;
+    warn.textContent = ok ? "" : `Warning: this bid risks future slots — keep ≥ ${Math.max(0,(remainingSlots()-1)*state.minBasePerPlayer)}`;
     return ok;
   }
   validate();
-
-  document.getElementById("btn-bid-base")?.addEventListener("click", () => {
-    bidInput.value = p.base;
-    validate();
-  });
-  document.getElementById("btn-plus10")?.addEventListener("click", () => {
-    bidInput.value = String(Math.max(p.base, toNum(bidInput.value, p.base) + 10));
-    validate();
-  });
-  document.getElementById("btn-mark-won")?.addEventListener("click", () => {
+  document.getElementById("btn-bid-base")?.addEventListener("click", ()=>{ bidInput.value = p.base; validate(); });
+  document.getElementById("btn-plus10")?.addEventListener("click", ()=>{ bidInput.value = String(Math.max(p.base, toNum(bidInput.value, p.base)+10)); validate(); });
+  document.getElementById("btn-mark-won")?.addEventListener("click", ()=>{
     const bid = toNum(bidInput.value, p.base);
     if (!guardrailOK(bid)) { alert("Guardrail violated. Reduce bid."); return; }
     markWon(p.id, bid);
   });
-  document.getElementById("btn-pass")?.addEventListener("click", () => markLost(p.id));
-  document.getElementById("btn-skip")?.addEventListener("click", () => nextPlayer());
+  document.getElementById("btn-pass")?.addEventListener("click", ()=> markLost(p.id));
+  document.getElementById("btn-skip")?.addEventListener("click", ()=> nextPlayer());
 }
 
 function renderSelectedList(){
-  const container = document.getElementById("selectedList");
-  if (!container) return;
-
-  const won = state.players
-    .filter(p => p.status === "won")
-    .sort((a,b) => (b.finalBid||0) - (a.finalBid||0));
-
-  if (!won.length) {
-    container.innerHTML = `<div class="hint">No players selected yet.</div>`;
-    return;
-  }
-
-  container.innerHTML = won.map(p => {
-    const line1 = `${p.name} — ${p.role}${p.is_wk ? " (WK)" : ""}${p.batting_hand ? ", " + p.batting_hand + "-hand" : ""}`;
-    const line2 = [
-      p.category ? `Category: ${p.category}` : null,
-      p.alumni ? `Alumni: ${p.alumni}` : null,
-      p.age ? `Age: ${p.age}` : null,
-      p.grade ? `Grade: ${p.grade}` : null,
-      `Bid: ${p.finalBid}`
-    ].filter(Boolean).join(" • ");
-
-    return `
-      <div class="item">
-        <div class="title"><div><b>${line1}</b></div></div>
-        <div class="meta">${line2}</div>
-      </div>
-    `;
+  const won = state.players.filter(p=>p.status==="won").sort((a,b)=>(b.finalBid||0)-(a.finalBid||0));
+  if (!won.length){ selectedListEl.innerHTML = `<div class="hint">No players selected yet.</div>`; return; }
+  selectedListEl.innerHTML = won.map(p=>{
+    const l1 = `${p.name} — #${p.rank} · Cat ${p.category} · ${p.role}${p.is_wk?" (WK)":""}`;
+    const l2 = [`Rating10 ${p.rating10 ?? 0}`, p.alumni?`Alumni: ${p.alumni}`:null, p.age?`Age: ${p.age}`:null, `Bid: ${p.finalBid}`]
+      .filter(Boolean).join(" • ");
+    return `<div class="item">
+      <div class="title"><div><b>${l1}</b></div></div>
+      <div class="meta">${l2}</div>
+    </div>`;
   }).join("");
 }
