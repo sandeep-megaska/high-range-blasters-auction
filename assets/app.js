@@ -441,37 +441,23 @@ function markLostToOtherClub(id) {
 
   const clubNames = (state.clubs || []).filter(c => c.slug !== state.myClubSlug).map(c => c.name);
   if (!clubNames.length) {
-    // no other clubs defined → fallback to simple lost
     state.players = state.players.map(p => p.id === id ? { ...p, status: "lost", owner: null, finalBid: undefined } : p);
     state.log.push({ type: "lost", id });
-    state.activeId = null;
-    persist();
-    render();
-    return;
+    state.activeId = null; persist(); render(); return;
   }
 
-  const clubName = prompt(`Which club won ${player.name}? \nOptions: ${clubNames.join(", ")}`);
-  if (!clubName) {
-    updatePlayer(id, { status: "lost", owner: null });
-    return;
-  }
+  const clubName = prompt(`Which club won ${player.name}?\nOptions: ${clubNames.join(", ")}`);
+  if (!clubName) { updatePlayer(id, { status: "lost", owner: null }); return; }
 
   const club = state.clubs.find(c => c.name.toLowerCase().trim() === clubName.toLowerCase().trim());
-  if (!club) {
-    alert("Club not found. Please type the exact name.");
-    return;
-  }
+  if (!club) { alert("Club not found. Type the exact name."); return; }
 
   const amtRaw = prompt(`Winning price for ${player.name} (by ${club.name})?`, String(player.base || ""));
   const finalBid = Math.max(0, Number(amtRaw) || 0);
 
-  state.players = state.players.map(p =>
-    p.id === id ? { ...p, status: "won", owner: club.slug, finalBid } : p
-  );
+  state.players = state.players.map(p => p.id === id ? { ...p, status: "won", owner: club.slug, finalBid } : p);
   state.log.push({ type: "lost", id, owner: club.slug, finalBid });
-  state.activeId = null;
-  persist();
-  render();
+  state.activeId = null; persist(); render();
 }
 
 
