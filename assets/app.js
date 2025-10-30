@@ -916,8 +916,9 @@ async function wirePassPanelForPlayer(p) {
   // Just ensure the passPanel is visible; assignment happens via its "Assign" button
   const passPanel = document.getElementById("passPanel");
   if (passPanel) passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+    await wirePassPanelForPlayer(p);
 });
-await wirePassPanelForPlayer(p);
+
 
 
  document.getElementById("btn-pass")?.addEventListener("click", () => {
