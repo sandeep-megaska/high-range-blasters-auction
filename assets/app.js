@@ -33,7 +33,7 @@ let state = {
 };
 
 function persist() {
-  try {
+   try {
     localStorage.setItem("hrb-auction-state", JSON.stringify(state));
   } catch {}
 }
@@ -475,90 +475,114 @@ function wireCreateClubUI() {
    (columns: id,name,base,category,rank,role)
 */
 // --- REPLACE your existing wireCsvImportUI() with this ---
+// Drop-in replacement
 function wireCsvImportUI() {
-  const urlEl = document.getElementById("csvUrl");
+  const urlEl   = document.getElementById("csvUrl");
   const pasteEl = document.getElementById("csvPaste");
-  const msg = document.getElementById("importMsg");
+  const msgEl   = document.getElementById("importMsg");
 
-  // Support BOTH naming schemes
-  const btnFetch = document.getElementById("btn-fetch") || document.getElementById("btnImportCsv");
-  const btnImport = document.getElementById("btn-import") || document.getElementById("btnImport");
-  const btnClearUrl = document.getElementById("btn-clear-url") || document.getElementById("btnClearUrl");
+  const btnFetch      = document.getElementById("btn-fetch")       || document.getElementById("btnImportCsv");
+  const btnImport     = document.getElementById("btn-import")      || document.getElementById("btnImport");
+  const btnClearUrl   = document.getElementById("btn-clear-url")   || document.getElementById("btnClearUrl");
   const btnClearPaste = document.getElementById("btn-clear-paste") || document.getElementById("btnClearPaste");
 
-  function setMsg(t) { if (msg) msg.textContent = t; }
+  const setMsg = (t) => { if (msgEl) msgEl.textContent = t; };
 
+  // --- Fetch CSV ---
   if (btnFetch && urlEl) {
     btnFetch.onclick = null;
     btnFetch.addEventListener("click", async () => {
-      setMsg("");
-      const url = (urlEl.value || "").trim();
-      if (!url) { setMsg("Enter a Google Sheet CSV URL"); return; }
       try {
+        setMsg("");
+        const url = (urlEl.value || "").trim();
+        if (!url) { setMsg("Enter a Google Sheet CSV URL"); return; }
         const resp = await fetch(url, { cache: "no-store" });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const text = await resp.text();
-        // Put it in the textarea for visibility; optionally import directly
         if (pasteEl) pasteEl.value = text;
-        setMsg("Fetched CSV — you can edit then click Import.");
+        setMsg("Fetched CSV — click Import to load players.");
       } catch (e) {
-        console.error(e);
-        setMsg("Fetch failed. Check the URL & sharing settings.");
+        console.error("Fetch CSV failed:", e);
+        setMsg("Fetch failed. Ensure the sheet is 'Published to the web' and URL ends with output=csv.");
       }
     });
   }
 
-  if (btnImport) {
+  // --- Import CSV (with fallback for notes-style rows) ---
+  if (btnImport && pasteEl) {
     btnImport.onclick = null;
     btnImport.addEventListener("click", () => {
-      setMsg("");
-      const raw = (pasteEl?.value || "").trim();
-      if (!raw) { setMsg("Paste CSV data first or use Fetch CSV."); return; }
+      try {
+        setMsg("");
+        const raw = (pasteEl.value || "").trim();
+        if (!raw) { setMsg("Paste CSV data first or use Fetch CSV."); return; }
 
-      const rows = raw.split(/\r?\n/).filter(Boolean);
-      if (!rows.length) { setMsg("No rows detected."); return; }
+        const rows = raw.split(/\r?\n/).filter(Boolean);
+        if (!rows.length) { setMsg("No rows detected."); return; }
 
-      const header = rows.shift().split(",").map(h => h.trim().toLowerCase());
-      const idx = (name) => header.findIndex(h => h === name);
+        const first = rows[0].toLowerCase();
+        const headerLike = /(^|,)\s*(name|rank|base|category|role)\s*(,|$)/.test(first);
 
-      // Try to map your common columns; fall back where missing
-      const idI   = idx("id");           // optional
-      const nameI = idx("name");         // required-ish
-      const baseI = idx("base");         // optional
-      const catI  = idx("category");     // optional
-      const rankI = idx("rank");         // optional
-      const roleI = idx("role");         // optional
+        const toNum = (v, d=0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+        let players = [];
 
-      const toNum = (v, d=0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+        if (headerLike) {
+          const header = rows.shift().split(",").map(h => h.trim().toLowerCase());
+          const idx = n => header.indexOf(n);
+          const idI=idx("id"), nameI=idx("name"), baseI=idx("base"), catI=idx("category"), rankI=idx("rank"), roleI=idx("role");
 
-      const players = rows.map((r, i) => {
-        // handle quoted CSV minimally
-        // (for simple sheets this split is fine; if you need full CSV parsing later, we can add it)
-        const cols = r.split(",");
-        return {
-          id: (idI >= 0 ? cols[idI] : String(i+1)).trim(),
-          name: (nameI >= 0 ? cols[nameI] : `Player ${i+1}`).trim(),
-          base: toNum(baseI >= 0 ? cols[baseI] : "", 500),
-          category: (catI >= 0 ? cols[catI] : "").trim(),
-          rank: toNum(rankI >= 0 ? cols[rankI] : i+1),
-          role: (roleI >= 0 ? cols[roleI] : "").trim(),
-          status: "new"
-        };
-      });
+          players = rows.map((r,i)=>{
+            const c=r.split(",");
+            return {
+              id: (idI>=0?c[idI]:String(i+1)).trim(),
+              name: (nameI>=0?c[nameI]:`Player ${i+1}`).trim(),
+              base: toNum(baseI>=0?c[baseI]:500),
+              category: (catI>=0?c[catI]:"").trim(),
+              rank: toNum(rankI>=0?c[rankI]:i+1),
+              role: (roleI>=0?c[roleI]:"").trim(),
+              status: "new",
+            };
+          });
+        } else {
+          // Fallback for lines like “81.Bidded Syam Madhusoodanan …”
+          players = rows.map((r,i)=>{
+            let name = (r.match(/bidded\s+([^,0-9][^,]*)/i)?.[1] || "").trim();
+            if (!name) {
+              const m = r.match(/\d+\.\s*([A-Za-z][A-Za-z\s\.']{2,})/);
+              name = (m?.[1] || `Player ${i+1}`).trim();
+            }
+            const nums = [...r.matchAll(/(\d{3,4})/g)].map(x => Number(x[1]));
+            const base = nums.length ? nums[nums.length-1] : 500;
 
-      // Save to state & render
-      state.players = players;
-      try { localStorage.setItem("hrb-auction-state", JSON.stringify(state)); } catch {}
-      render();
-      setMsg(`Imported ${players.length} players.`);
+            return { id:String(i+1), name, base, category:"", rank:i+1, role:"", status:"new" };
+          });
+        }
+
+        // Persist minimal state and render
+        const SKEY = "hrb-auction-state";
+        let st = {};
+        try { st = JSON.parse(localStorage.getItem(SKEY) || "{}") || {}; } catch {}
+        st.players = players;
+        st.playersNeeded = st.playersNeeded || 15;
+        st.totalPoints = st.totalPoints || 15000;
+        st.minBasePerPlayer = st.minBasePerPlayer || 500;
+        localStorage.setItem(SKEY, JSON.stringify(st));
+
+        if (typeof window.render === "function") window.render();
+        setMsg(`Imported ${players.length} players.`);
+        document.getElementById("playersList")?.scrollIntoView({ behavior:"smooth", block:"start" });
+      } catch (e) {
+        console.error("Import failed:", e);
+        setMsg("Import failed. Check console for details.");
+      }
     });
   }
 
+  // --- Clear buttons ---
   if (btnClearUrl && urlEl) {
     btnClearUrl.onclick = null;
     btnClearUrl.addEventListener("click", () => { urlEl.value = ""; setMsg(""); });
   }
-
   if (btnClearPaste && pasteEl) {
     btnClearPaste.onclick = null;
     btnClearPaste.addEventListener("click", () => { pasteEl.value = ""; setMsg(""); });
@@ -572,8 +596,10 @@ async function boot() {
   load();
   await ensureMyClubSeeded();
   wireCreateClubUI();
-  wireCsvImportUI();
+  wireCsvImportUI();   // ← this
+  wireStartBidUI?.();  // if you added Start Bid wiring
   render();
 }
+
 
 document.addEventListener("DOMContentLoaded", () => { boot(); });
