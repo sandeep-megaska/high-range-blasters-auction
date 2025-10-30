@@ -748,7 +748,7 @@ async function renderPlayersList(){
   });
 }
 
-function renderLiveBid(){
+async function renderLiveBid(){
   const p = state.players.find(x => x.id === state.activeId);
   if (!p) { liveBidEl.innerHTML = `<div class="hint">Pick a player via Start Bid above or click <b>Next Player</b>.</div>`; return; }
 
@@ -816,7 +816,7 @@ async function wirePassPanelForPlayer(p) {
   } catch (e) {
     console.warn("fetchClubs failed:", e);
   }
-await wirePassPanelForPlayer(p);
+
   const others = getOtherClubs();
 
   // 2) If no other clubs yet, show guidance and bail
@@ -971,4 +971,4 @@ function wireCreateClubUI() {
 document.addEventListener("DOMContentLoaded", () => {
   try { wireCreateClubUI(); } catch {}
 });
-
+await wirePassPanelForPlayer(p);
