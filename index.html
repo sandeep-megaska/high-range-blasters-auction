@@ -245,5 +245,44 @@ https://docs.google.com/spreadsheets/d/e/2PACX-1vRdYw7KawkwjdjGAg1U9xpLW0f1oA3jb
     import "./assets/supabaseClient.js";
     import "./assets/app.js";
   </script>
+  <script type="module">
+  function scrollToId(id, tries = 12) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      return true;
+    }
+    if (tries > 0) setTimeout(() => scrollToId(id, tries - 1), 100);
+    return false;
+  }
+
+  function wireHashScrolling() {
+    // handle <a href="#..."> and absolute URLs that end with #...
+    document.querySelectorAll('a[href*="#"]').forEach(a => {
+      a.addEventListener("click", (e) => {
+        const href = a.getAttribute("href");
+        const hash = href?.includes("#") ? href.split("#").pop() : "";
+        if (!hash) return;
+        e.preventDefault();                     // avoid default jump (in case a SPA blocks it)
+        history.pushState(null, "", "#" + hash);
+        scrollToId(hash);
+      });
+    });
+
+    // support back/forward hash navigation
+    window.addEventListener("hashchange", () => {
+      const id = (location.hash || "").slice(1);
+      if (id) scrollToId(id);
+    });
+
+    // if page loads with a hash, scroll after first paint
+    const initial = (location.hash || "").slice(1);
+    if (initial) setTimeout(() => scrollToId(initial), 0);
+  }
+
+  // call after DOM is ready
+  document.addEventListener("DOMContentLoaded", wireHashScrolling);
+</script>
+
 </body>
 </html>
