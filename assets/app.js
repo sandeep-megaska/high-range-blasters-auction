@@ -707,7 +707,7 @@ function renderCompliance(){
   `;
 }
 
-function renderPlayersList(){
+async function renderPlayersList(){
   playersListEl.innerHTML = "";
   const withScores = state.players.map(p => ({ ...p, valueScore: computeValueScore(p, state.players, state.constraints) }));
   withScores.forEach(p => {
@@ -793,7 +793,7 @@ function renderLiveBid(){
       </div>
     </div>
   `;
-   await wirePassPanelForPlayer(p);
+   
 // Show pass panel for assignment
 async function wirePassPanelForPlayer(p) {
   const passPanel = document.getElementById("passPanel");
@@ -816,7 +816,7 @@ async function wirePassPanelForPlayer(p) {
   } catch (e) {
     console.warn("fetchClubs failed:", e);
   }
-
+await wirePassPanelForPlayer(p);
   const others = getOtherClubs();
 
   // 2) If no other clubs yet, show guidance and bail
