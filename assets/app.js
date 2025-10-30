@@ -1,336 +1,56 @@
-// KEEP just this one from supabaseClient.js
-import {
-  sb,
-  fetchClubs,
-  createClubDB,
-  updateClubDB,
-  deleteClubDB,
-  adjustBudgetDB,
-  onClubsRealtime,
-  loadConstraintsFromSupabase,
-  loadSettingsFromSupabase
-} from "./supabaseClient.js";
+/* assets/app.js — HRB Auction Assist (clubs + pass panel + local/Supabase)
+   Paste this file as-is. It works with or without Supabase.
+   If you want Supabase, set window.ENV = { SUPABASE_URL, SUPABASE_ANON_KEY } in index.html
+   and load the UMD: <script src="https://unpkg.com/@supabase/supabase-js@2"></script> BEFORE this module.
+*/
 
+/* ===========================
+   State & Persistence
+=========================== */
+const DEFAULT_CONSTRAINTS = {}; // keep for compatibility if you use it elsewhere
 
-import {
-  STORAGE_KEY,
-  SAMPLE_CSV,
-  parseCSV,
-  shuffle,
-  csvExport,
-  toNum,
-  categoryFromRank
-} from "./utils.js";
-
-import {
-  DEFAULT_CONSTRAINTS,
-  evaluateRosterCompliance,
-  computeValueScore,
-  tierFromScore
-} from "./constraints.js";
-
-
-
-// -------- Auth ----------
-const AUTH_USER = "HRB";
-const AUTH_PASS = "sandeep";
-
-// -------- State ----------
 let state = {
-  // data
-  players: [],
+  // players & auction
+  players: [],           // [{id,name,base,category,rank,role,status,finalBid,owner}]
   queue: [],
   totalPoints: 15000,
   playersNeeded: 15,
-  minBasePerPlayer: 500, // guardrail per remaining slot (defaults to Cat5)
+  minBasePerPlayer: 500,
   activeId: null,
   log: [],
   constraints: DEFAULT_CONSTRAINTS,
 
- catBase: { c1:1500, c2:1200, c3:900, c4:700, c5:500 },
+  // categories (editable in settings if you have a UI)
+  catBase: { c1:1500, c2:1200, c3:900, c4:700, c5:500 },
 
-  // auth/setup
-  auth: { loggedIn: false },
-  setup: {
-    done: false,
-    playersCap: 15,
-    overallPoints: 15000,
-    catBase: { c1:1500, c2:1200, c3:900, c4:700, c5:500 },
-    guardMin: 0,
-    preselectedName: "",
-    preselectedBid: 0
-  },
+  // setup/auth (no-op by default)
+  auth: { loggedIn: true },
+  setup: { done: true },
 
-  // ✅ clubs & ownership (keep these INSIDE)
+  // clubs
   myClubSlug: "high-range-blasters",
-  clubs: [] // HRB is auto-seeded in load() via ensureMyClubSeeded()
+  clubs: [] // [{id,slug,name,logo_url,starting_budget,budget_left}]
 };
-  
- 
-// -------- DOM ----------
-const $ = s => document.querySelector(s);
-// Views
-const appMain = $("#appMain");
-const loginView = $("#loginView");
-const settingsView = $("#settingsView");
 
-// Login
-const loginUser = $("#loginUser");
-const loginPass = $("#loginPass");
-const loginError = $("#loginError");
-$("#btn-login")?.addEventListener("click", onLogin);
-$("#btn-logout")?.addEventListener("click", onLogout);
-
-// Settings inputs
-const cfgPlayersCap = $("#cfgPlayersCap");
-const cfgTotalPoints = $("#cfgTotalPoints");
-const cfgBaseC1 = $("#cfgBaseC1");
-const cfgBaseC2 = $("#cfgBaseC2");
-const cfgBaseC3 = $("#cfgBaseC3");
-const cfgBaseC4 = $("#cfgBaseC4");
-const cfgBaseC5 = $("#cfgBaseC5");
-const cfgGuardMin = $("#cfgGuardMin");
-const cfgPreName = $("#cfgPreName");
-const cfgPreBid = $("#cfgPreBid");
-const cfgAvailableScore = $("#cfgAvailableScore");
-const settingsError = $("#settingsError");
-$("#btn-save-settings")?.addEventListener("click", onSaveSettings);
-[cfgPlayersCap,cfgTotalPoints,cfgBaseC1,cfgBaseC2,cfgBaseC3,cfgBaseC4,cfgBaseC5,cfgGuardMin,cfgPreName,cfgPreBid]
-  .forEach(el => el?.addEventListener("input", updateAvailableScorePreview));
-
-// Left controls
-$("#totalPoints")?.addEventListener("change", e => { state.totalPoints = toNum(e.target.value, state.totalPoints); persist(); render(); });
-$("#playersNeeded")?.addEventListener("change", e => { state.playersNeeded = toNum(e.target.value, state.playersNeeded); persist(); render(); });
-$("#minBasePerPlayer")?.addEventListener("change", e => { state.minBasePerPlayer = toNum(e.target.value, state.minBasePerPlayer); persist(); render(); });
-$("#btn-shuffle")?.addEventListener("click", () => randomizeQueue());
-$("#btn-next")?.addEventListener("click", () => nextPlayer());
-$("#btn-undo")?.addEventListener("click", () => undo());
-
-// Import
-const csvUrlEl = $("#csvUrl");
-const csvPasteEl = $("#csvPaste");
-$("#btn-fetch")?.addEventListener("click", () => importFromCsvUrl());
-$("#btn-clear-url")?.addEventListener("click", () => { csvUrlEl.value = ""; });
-$("#btn-import")?.addEventListener("click", () => importFromPaste());
-$("#btn-clear-paste")?.addEventListener("click", () => { csvPasteEl.value = ""; });
-
-// Stats/Right/Middle
-const remainingPointsEl = $("#remainingPoints");
-const remainingSlotsEl = $("#remainingSlots");
-const guardrailEl = $("#guardrail");
-const playersListEl = $("#playersList");
-const playersCountEl = $("#playersCount");
-const complianceBarEl = $("#complianceBar");
-const liveBidEl = $("#liveBid");
-const selectedListEl = $("#selectedList");
-
-// Typeahead
-const startNameEl = $("#startName");
-const startResultsEl = $("#startResults");
-const seedBaseEl = $("#seedBase");
-const btnStartBid = $("#btn-start-bid");
-startNameEl?.addEventListener("input", onTypeahead);
-btnStartBid?.addEventListener("click", onSetActiveFromTypeahead);
-
-// Header buttons
-$("#btn-export")?.addEventListener("click", () => exportWon());
-$("#btn-reset")?.addEventListener("click", () => { localStorage.removeItem(STORAGE_KEY); location.reload(); });
-
-// -------- Init ----------
-load();
-routeViews();
-
-(async () => {
-  if (state.auth.loggedIn && state.setup.done) {
-    await ensureMyClubSeeded(); // pulls DB, seeds HRB if missing
-    render();
-    warmloadSupabase(); // your existing optional loader
-
-    // Realtime: refresh clubs on any DB change
-    onClubsRealtime(async () => {
-      try {
-        state.clubs = await fetchClubs();
-        render();
-      } catch {}
-    });
-  }
-})();
-
-// -------- Routing ----------
-function routeViews(){
-  const logged = !!state.auth.loggedIn;
-  const setupDone = !!state.setup.done;
-  $("#btn-logout").style.display = logged ? "inline-block" : "none";
-
-  if (!logged) {
-    show(loginView); hide(settingsView); hide(appMain);
-    loginUser.value = AUTH_USER; loginPass.value = AUTH_PASS; loginError.textContent = "";
-    return;
-  }
-  if (logged && !setupDone){
-    // Prefill
-    cfgPlayersCap.value = state.setup.playersCap;
-    cfgTotalPoints.value = state.setup.overallPoints;
-    cfgBaseC1.value = state.setup.catBase.c1;
-    cfgBaseC2.value = state.setup.catBase.c2;
-    cfgBaseC3.value = state.setup.catBase.c3;
-    cfgBaseC4.value = state.setup.catBase.c4;
-    cfgBaseC5.value = state.setup.catBase.c5;
-    cfgGuardMin.value = state.setup.guardMin || "";
-    cfgPreName.value = state.setup.preselectedName || "";
-    cfgPreBid.value = state.setup.preselectedBid || 0;
-    updateAvailableScorePreview();
-    show(settingsView); hide(loginView); hide(appMain);
-    return;
-  }
-  show(appMain); hide(loginView); hide(settingsView);
-}
-function show(el){ if (el) el.style.display = ""; }
-function hide(el){ if (el) el.style.display = "none"; }
-
-// -------- Auth ----------
-function onLogin(){
-  const u = (loginUser.value || "").trim();
-  const p = (loginPass.value || "").trim();
-  if (u === AUTH_USER && p === AUTH_PASS) {
-    state.auth.loggedIn = true; persist(); routeViews();
-  } else {
-    loginError.textContent = "Invalid username or password.";
-  }
-}
-function onLogout(){ state.auth.loggedIn = false; persist(); routeViews(); }
-
-// -------- Preselected helpers ----------
-function parsePreselectedInput(rawNameField, singleBidField) {
-  const s = (rawNameField || "").trim();
-  if (!s) return [];
-  const looksLikeList = /[=;]/.test(s) || (s.includes(",") && s.includes("="));
-  if (looksLikeList) {
-    return s.split(/[;,]/g).map(x => x.trim()).filter(Boolean).map(pair => {
-      const [n, b] = pair.split("=").map(z => (z ?? "").trim());
-      return { name: n, bid: Number(b) || 0 };
-    }).filter(x => x.name);
-  }
-  return [{ name: s, bid: Number(singleBidField) || 0 }];
-}
-function applyPreselected(preList, players) {
-  const applied = []; const missing = [];
-  const next = players.map(p => ({ ...p }));
-  preList.forEach(entry => {
-    const target = next.find(x => (x.name || "").trim().toLowerCase() === entry.name.trim().toLowerCase());
-    if (target) {
-      if (target.status !== "won") { target.status="won"; target.finalBid = Math.max(0, Number(entry.bid)||0); }
-      applied.push({ name: target.name, bid: target.finalBid||0 });
-    } else missing.push(entry.name);
-  });
-  return { playersUpdated: next, applied, missing };
-}
-function reapplyPreselectedIfAny() {
-  const preList = parsePreselectedInput(state.setup.preselectedName, state.setup.preselectedBid);
-  if (!preList.length) return;
-  const { playersUpdated } = applyPreselected(preList, state.players);
-  state.players = playersUpdated;
-}
-function getOtherClubs() {
-  const all = Array.isArray(state.clubs) ? state.clubs : [];
-  return all.filter(c => c.slug !== state.myClubSlug);
-}
-
-// -------- Settings ----------
-function updateAvailableScorePreview(){
-  const total = toNum(cfgTotalPoints.value, 15000);
-  const preList = parsePreselectedInput(cfgPreName.value, cfgPreBid.value);
-  const preTotal = preList.reduce((t, x) => t + Math.max(0, Number(x.bid) || 0), 0);
-  cfgAvailableScore.textContent = Math.max(0, total - preTotal);
-}
-function onSaveSettings(){
-  settingsError.textContent = "";
-  const playersCap = toNum(cfgPlayersCap.value, 15);
-  const overallPoints = toNum(cfgTotalPoints.value, 15000);
-  const catBase = {
-    c1: toNum(cfgBaseC1.value, 1500),
-    c2: toNum(cfgBaseC2.value, 1200),
-    c3: toNum(cfgBaseC3.value, 900),
-    c4: toNum(cfgBaseC4.value, 700),
-    c5: toNum(cfgBaseC5.value, 500),
-  };
-  const guardMin = toNum(cfgGuardMin.value, 0);
-  const preName = (cfgPreName.value || "").trim();
-  const preBid = toNum(cfgPreBid.value, 0);
-
-  if (playersCap <= 0 || overallPoints <= 0) { settingsError.textContent = "Enter positive values for players and points."; return; }
-
-  state.setup.playersCap = playersCap;
-  state.setup.overallPoints = overallPoints;
-  state.setup.catBase = catBase;
-  state.setup.guardMin = guardMin;
-  state.setup.preselectedName = preName;
-  state.setup.preselectedBid = preBid;
-  state.setup.done = true;
-
-  state.playersNeeded = playersCap;
-  state.totalPoints = overallPoints;
-  state.catBase = { ...catBase };
-  state.minBasePerPlayer = guardMin > 0 ? guardMin : catBase.c5;
-
-  // Inject category base into players if base is blank/0
-  state.players = state.players.map(p => {
-    const c = p.category || categoryFromRank(p.rank);
-    const catBaseVal = c===1?catBase.c1:c===2?catBase.c2:c===3?catBase.c3:c===4?catBase.c4:catBase.c5;
-    return { ...p, category: c, base: p.base>0 ? p.base : catBaseVal };
-  });
-
-  // Apply preselected
-  const preList = parsePreselectedInput(preName, preBid);
-  if (preList.length) {
-    const { playersUpdated, missing } = applyPreselected(preList, state.players);
-    state.players = playersUpdated;
-    if (missing.length) settingsError.textContent = `Not found (will recheck after CSV import): ${missing.join(", ")}`;
-  }
-
-  persist(); routeViews(); render();
-}
-
-// -------- Load / Save ----------
-function load(){
+function persist() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) state = { ...state, ...JSON.parse(raw) };
-    if (!state.players || !state.players.length){
-      state.players = parseCSV(SAMPLE_CSV);
-      state.queue = shuffle(state.players.map(p=>p.id));
-      state.activeId = null;
-    }
-  } catch {
-    state.players = parseCSV(SAMPLE_CSV);
-    state.queue = shuffle(state.players.map(p=>p.id));
-    state.activeId = null;
-  }
-  // reflect controls
-  $("#totalPoints").value = state.totalPoints;
-  $("#playersNeeded").value = state.playersNeeded;
-  $("#minBasePerPlayer").value = state.minBasePerPlayer;
-    ensureMyClubSeeded();
-  persist();
-
-}
-async function warmloadSupabase(){
-  const team = "high-range-blasters";
-  try {
-    const s = await loadSettingsFromSupabase(team);
-    if (s) {
-      state.totalPoints = s.total_points ?? state.totalPoints;
-      state.playersNeeded = s.players_needed ?? state.playersNeeded;
-      $("#totalPoints").value = state.totalPoints;
-      $("#playersNeeded").value = state.playersNeeded;
-    }
-    const c = await loadConstraintsFromSupabase(team);
-    if (c && c.length) state.constraints = c;
-    persist(); render();
+    localStorage.setItem("hrb-auction-state", JSON.stringify(state));
   } catch {}
 }
-function persist(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-// ---------- Clubs helpers ----------
+function load() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("hrb-auction-state") || "{}");
+    if (saved && typeof saved === "object") {
+      state = { ...state, ...saved };
+    }
+  } catch {}
+}
+
+/* ===========================
+   Utilities
+=========================== */
+function $(id) { return document.getElementById(id); }
+
 function slugify(name) {
   return String(name || "")
     .toLowerCase()
@@ -339,8 +59,107 @@ function slugify(name) {
     .slice(0, 60);
 }
 
-function hasSupabase() {
-  return typeof fetchClubs === "function" && typeof createClubDB === "function";
+function toNum(v, fallback=0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : Number(fallback) || 0;
+}
+
+function remainingSlots() {
+  const my = clubStats(state.myClubSlug);
+  const taken = my.count;
+  return Math.max(0, (state.playersNeeded || 15) - taken);
+}
+
+function guardrailOK(bid) {
+  const slotsLeft = remainingSlots();
+  // very simple guard: keep at least minBasePerPlayer for each remaining slot (except the current)
+  const my = clubStats(state.myClubSlug);
+  const start = my.club ? (my.club.starting_budget ?? 15000) : (state.totalPoints || 15000);
+  const spent = my.spend;
+  const budgetLeft = Math.max(0, (typeof my.budgetLeft === "number" ? my.budgetLeft : start - spent));
+  const reserve = Math.max(0, (slotsLeft - 1) * (state.minBasePerPlayer || 500));
+  return bid <= Math.max(0, budgetLeft - reserve);
+}
+
+/* ===========================
+   Supabase (optional)
+=========================== */
+function supabaseAvailable() {
+  return !!(window.ENV?.SUPABASE_URL && window.ENV?.SUPABASE_ANON_KEY && window.supabase?.createClient);
+}
+
+let sb = null;
+if (supabaseAvailable()) {
+  sb = window.supabase.createClient(window.ENV.SUPABASE_URL, window.ENV.SUPABASE_ANON_KEY);
+}
+
+// DB helpers (no-ops if Supabase not present)
+async function fetchClubs() {
+  if (!sb) return state.clubs || [];
+  const { data, error } = await sb.from("clubs").select("*").order("name", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+async function createClubDB({ slug, name, logo_url, starting_budget }) {
+  if (!sb) return; // local fallback used elsewhere
+  const { error } = await sb.from("clubs").insert({
+    slug, name, logo_url: logo_url || null,
+    starting_budget: starting_budget ?? 15000,
+    budget_left: starting_budget ?? 15000
+  });
+  if (error) throw error;
+}
+async function updateBudgetDB(club_id, delta) {
+  if (!sb) return;
+  const { error } = await sb.rpc("adjust_budget", { p_club_id: club_id, p_delta: delta });
+  if (error) throw error;
+}
+
+/* ===========================
+   Clubs core
+=========================== */
+function getOtherClubs() {
+  const all = Array.isArray(state.clubs) ? state.clubs : [];
+  return all.filter(c => c.slug !== state.myClubSlug);
+}
+
+function clubStats(slug) {
+  const club = (state.clubs || []).find(c => c.slug === slug);
+  if (!club) return { club: null, count: 0, spend: 0, budgetLeft: 0, players: [] };
+  const players = (state.players || []).filter(p => p.status === "won" && p.owner === slug);
+  const spend = players.reduce((s, p) => s + (toNum(p.finalBid, 0)), 0);
+  const dbLeft = (typeof club.budget_left === "number") ? club.budget_left : null;
+  const start = toNum(club.starting_budget ?? state.totalPoints, state.totalPoints);
+  const derivedLeft = Math.max(0, start - spend);
+  return { club, count: players.length, spend, budgetLeft: dbLeft ?? derivedLeft, players };
+}
+
+async function ensureMyClubSeeded() {
+  // load from DB if possible
+  try {
+    state.clubs = await fetchClubs();
+  } catch (e) {
+    console.warn("fetchClubs failed:", e);
+    state.clubs = state.clubs || [];
+  }
+  const hrbSlug = state.myClubSlug;
+  const found = state.clubs.find(c => c.slug === hrbSlug);
+  if (!found) {
+    const start = state.totalPoints || 15000;
+    if (sb) {
+      try {
+        await createClubDB({ slug: hrbSlug, name: "High Range Blasters", logo_url: "./assets/hrb.svg", starting_budget: start });
+        state.clubs = await fetchClubs();
+      } catch (e) {
+        console.warn("createClubDB failed, falling back local:", e);
+        state.clubs.push({ id: "local-hrb", slug: hrbSlug, name: "High Range Blasters", logo_url: "./assets/hrb.svg", starting_budget: start, budget_left: start });
+      }
+    } else {
+      // local fallback
+      state.clubs.push({ id: "local-hrb", slug: hrbSlug, name: "High Range Blasters", logo_url: "./assets/hrb.svg", starting_budget: start, budget_left: start });
+    }
+  }
+  persist();
 }
 
 async function addClubLocal({ name, logo_url, starting_budget }) {
@@ -348,13 +167,14 @@ async function addClubLocal({ name, logo_url, starting_budget }) {
   const slug = slugify(name);
   if (!slug) throw new Error("Club name required.");
   if (state.clubs.some(c => c.slug === slug)) throw new Error("A club with this name already exists.");
+  const start = toNum(starting_budget, 15000);
   state.clubs.push({
     id: `local-${Date.now()}`,
     slug,
-    name,
+    name: name.trim(),
     logo_url: logo_url || null,
-    starting_budget: Number(starting_budget) || 0,
-    budget_left: Number(starting_budget) || 0
+    starting_budget: start,
+    budget_left: start
   });
   persist();
 }
@@ -363,111 +183,98 @@ async function addClubAndRefresh({ name, logo_url, starting_budget }) {
   const slug = slugify(name);
   if (!slug) throw new Error("Club name required.");
 
-  if (hasSupabase()) {
-    // DB path
-    await createClubDB({
-      slug,
-      name,
-      logo_url: logo_url || null,
-      starting_budget: Number(starting_budget) || 0
-    });
+  const start = toNum(starting_budget, 15000);
+  if (sb) {
+    await createClubDB({ slug, name: name.trim(), logo_url: (logo_url || null), starting_budget: start });
     state.clubs = await fetchClubs();
     persist();
   } else {
-    // Local fallback
-    await addClubLocal({ name, logo_url, starting_budget });
+    await addClubLocal({ name, logo_url, starting_budget: start });
   }
 }
 
+/* ===========================
+   Players helpers
+=========================== */
+function setActivePlayer(id) {
+  state.activeId = id;
+  persist();
+  render();
+}
 
-async function ensureMyClubSeeded() {
-  // Pull clubs from DB first
+async function markWon(id, bid) {
+  const winningBid = Math.max(0, toNum(bid, 0));
+  state.players = state.players.map(p => p.id === id ? { ...p, status: "won", owner: state.myClubSlug, finalBid: winningBid } : p);
+  state.log.push({ type: "won", id, bid: winningBid });
+  state.activeId = null;
+  persist();
   try {
-    const dbClubs = await fetchClubs();
-    state.clubs = dbClubs;
-  } catch (e) {
-    console.warn("fetchClubs failed (offline?):", e);
-    state.clubs = state.clubs || [];
-  }
-
-  // Ensure HRB exists
-  const hrbSlug = state.myClubSlug;
-  const found = state.clubs.find(c => c.slug === hrbSlug);
-  if (!found) {
-    const start = state.totalPoints || 15000;
-    const hrb = { slug: hrbSlug, name: "High Range Blasters", logo_url: "/assets/highrange.svg", starting_budget: start };
-    try {
-      await createClubDB(hrb);
+    const hrb = (state.clubs || []).find(c => c.slug === state.myClubSlug);
+    if (hrb?.id && sb) {
+      await updateBudgetDB(hrb.id, -winningBid);
       state.clubs = await fetchClubs();
-    } catch (e) {
-      // fallback to local mirror if DB not available
-      state.clubs.push({ id: "local-hrb", slug: hrbSlug, name: "High Range Blasters", logo_url: "/assets/highrange.svg", starting_budget: start, budget_left: start });
+      persist();
     }
+  } catch (e) {
+    console.warn("updateBudgetDB(HRB) failed:", e);
   }
-  persist();
+  render();
 }
-async function addClub({ name, logo, startingBudget }) {
-  const slug = slugify(name);
-  if (!slug) throw new Error("Club name required.");
 
-  await createClubDB({
-    slug,
-    name: name.trim(),
-    logo_url: (logo || "").trim() || null,
-    starting_budget: Math.max(0, Number(startingBudget) || 0)
+/* ===========================
+   Rendering
+=========================== */
+function renderPlayersList() {
+  const root = $("playersList");
+  if (!root) return;
+  const items = (state.players || []).map(p => {
+    const ownerName = p.owner ? ((state.clubs || []).find(c => c.slug === p.owner)?.name || p.owner) : "";
+    return `
+      <div class="card" style="padding:10px;margin-bottom:8px">
+        <div class="row" style="justify-content:space-between;gap:8px">
+          <div>
+            <div><b>${p.name || "-"}</b></div>
+            <div class="meta">Cat ${p.category ?? "-"} · Rank ${p.rank ?? "-"} · ${p.role || ""}</div>
+          </div>
+          <div class="meta">
+            Base: <b>${p.base ?? "-"}</b><br/>
+            ${p.status === "won" ? `Won by <b>${ownerName}</b> @ <b>${p.finalBid ?? "-"}</b>` : (p.status === "lost" ? `Passed` : ``)}
+          </div>
+        </div>
+        <div class="row" style="gap:6px;margin-top:8px">
+          <button class="btn" data-action="start" data-id="${p.id}">Start Bid</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+  root.innerHTML = items || `<div class="hint">Import players to begin.</div>`;
+
+  // wire
+  root.querySelectorAll("[data-action='start']").forEach(btn => {
+    btn.addEventListener("click", () => setActivePlayer(btn.getAttribute("data-id")));
   });
-  state.clubs = await fetchClubs();
-  persist();
-}
-
-async function editClub({ id, name, logo, startingBudget }) {
-  await updateClubDB({
-    id,
-    name: name?.trim(),
-    logo_url: (logo || "").trim(),
-    starting_budget: startingBudget != null ? Math.max(0, Number(startingBudget) || 0) : undefined
-  });
-  state.clubs = await fetchClubs();
-  persist();
-}
-
-async function removeClub(id) {
-  await deleteClubDB(id);
-  state.clubs = await fetchClubs();
-  persist();
-}
-
-
-function clubStats(slug) {
-  const club = state.clubs.find(c => c.slug === slug);
-  if (!club) return { club: null, count: 0, spend: 0, budgetLeft: 0, players: [] };
-  const players = (state.players || []).filter(p => p.status === "won" && p.owner === slug);
-  const spend = players.reduce((s, p) => s + (Number(p.finalBid) || 0), 0);
-  const budgetLeft = Math.max(0, (Number(club.startingBudget) || 0) - spend);
-  return { club, count: players.length, spend, budgetLeft, players };
 }
 
 function renderOtherClubsPanel() {
-  const root = document.getElementById("otherClubsPanel");
+  const root = $("otherClubsPanel");
   if (!root) return;
-  const others = (state.clubs || []).filter(c => c.slug !== state.myClubSlug);
-
+  const others = getOtherClubs();
   const blocks = others.map(c => {
     const stats = clubStats(c.slug);
     const list = stats.players.length
       ? stats.players.map(p => `
           <div class="item" style="padding:6px 0;border-bottom:1px solid #f3f4f6">
-            <div class="title"><b>${p.name}</b></div>
-            <div class="meta">#${p.rank} · Cat ${p.category} · ${p.role || ""}</div>
+            <div><b>${p.name}</b></div>
+            <div class="meta">#${p.rank ?? "-"} · Cat ${p.category ?? "-"} · ${p.role ?? ""}</div>
             <div class="meta">Bid: <b>${p.finalBid ?? "-"}</b></div>
           </div>
         `).join("")
       : `<div class="hint">No players yet.</div>`;
-
     return `
       <div class="card" style="padding:12px">
         <div class="row">
-          ${c.logo ? `<img src="${c.logo}" alt="${c.name}" class="brand-logo" style="width:36px;height:36px;border-radius:999px;object-fit:cover;margin-right:8px;" />` : `<div style="width:36px;height:36px;border-radius:999px;background:#e5e7eb;margin-right:8px;"></div>`}
+          ${c.logo_url ? `<img src="${c.logo_url}" alt="${c.name}" style="width:36px;height:36px;border-radius:999px;object-fit:cover;margin-right:8px;" />`
+                        : `<div style="width:36px;height:36px;border-radius:999px;background:#e5e7eb;margin-right:8px;"></div>`}
           <div>
             <div class="title"><b>${c.name}</b></div>
             <div class="meta">Players: ${stats.count} • Spend: ${stats.spend} • Budget left: ${stats.budgetLeft}</div>
@@ -477,401 +284,64 @@ function renderOtherClubsPanel() {
       </div>
     `;
   }).join("");
-
   root.innerHTML = blocks || `<div class="hint">Add clubs to see their squads.</div>`;
 }
 
-// wire the small "Add Club" card in index.html
-(function wireAddClubUI(){
-  const btn = document.getElementById("btn-create-club");
-  if (!btn) return;
-  btn.addEventListener("click", () => {
-    const name = (document.getElementById("club-name")?.value || "").trim();
-    const logo = (document.getElementById("club-logo")?.value || "").trim();
-    const budget = (document.getElementById("club-budget")?.value || "").trim();
-    const msg = document.getElementById("club-create-msg");
-    try {
-      addClub({ name, logo, startingBudget: budget });
-      if (msg) msg.textContent = "Club created.";
-      if (document.getElementById("club-name")) document.getElementById("club-name").value = "";
-      if (document.getElementById("club-logo")) document.getElementById("club-logo").value = "";
-      if (document.getElementById("club-budget")) document.getElementById("club-budget").value = "";
-      renderOtherClubsPanel();
-    } catch (e) {
-      if (msg) msg.textContent = "Error: " + (e?.message || e);
-    }
-  });
-})();
-
-// -------- Derived ----------
-function remainingSlots(){ return Math.max(0, state.playersNeeded - state.players.filter(p=>p.status==="won").length); }
-function spentPoints(){ return state.players.reduce((t,p)=>t + (p.status==="won"?(p.finalBid||0):0),0); }
-function remainingPoints(){ return Math.max(0, state.totalPoints - spentPoints()); }
-function guardrailOK(afterSpend=0){
-  const remAfter = remainingPoints() - afterSpend;
-  const slotsAfter = Math.max(0, remainingSlots() - (afterSpend>0?1:0));
-  return remAfter >= (slotsAfter * state.minBasePerPlayer);
-}
-
-// -------- Queue / Actions ----------
-function randomizeQueue(){
-  const ids = state.players.filter(p=>p.status==="pending").map(p=>p.id);
-  state.queue = shuffle(ids); state.activeId=null; persist(); render();
-}
-function nextPlayer(){
-  if (!state.queue.length){ randomizeQueue(); return; }
-  const [head,...rest] = state.queue; state.queue=rest; state.activeId=head; persist(); render();
-}
-async function markWon(id, bid) {
-  const winningBid = Math.max(0, Number(bid) || 0);
-
-  // Update local player
-  state.players = state.players.map(p => p.id === id ? { ...p, status: "won", owner: state.myClubSlug, finalBid: winningBid } : p);
-  state.log.push({ type: "won", id, bid: winningBid });
-  state.activeId = null;
-  persist();
-
-  // Adjust HRB budget in DB (best-effort)
-  try {
-    const hrb = (state.clubs || []).find(c => c.slug === state.myClubSlug);
-    if (hrb?.id) await adjustBudgetDB({ club_id: hrb.id, delta: -winningBid });
-    // refresh clubs to get updated budget_left
-    state.clubs = await fetchClubs();
-  } catch (e) {
-    console.warn("adjustBudgetDB failed:", e);
-  }
-
-  render();
-}
-
-function markLostToOtherClub(id) {
-  const player = state.players.find(p => p.id === id);
-  if (!player) return;
-
-  const clubNames = (state.clubs || []).filter(c => c.slug !== state.myClubSlug).map(c => c.name);
-  if (!clubNames.length) {
-    state.players = state.players.map(p => p.id === id ? { ...p, status: "lost", owner: null, finalBid: undefined } : p);
-    state.log.push({ type: "lost", id });
-    state.activeId = null; persist(); render(); return;
-  }
-
-  const clubName = prompt(`Which club won ${player.name}?\nOptions: ${clubNames.join(", ")}`);
-  if (!clubName) { updatePlayer(id, { status: "lost", owner: null }); return; }
-
-  const club = state.clubs.find(c => c.name.toLowerCase().trim() === clubName.toLowerCase().trim());
-  if (!club) { alert("Club not found. Type the exact name."); return; }
-
-  const amtRaw = prompt(`Winning price for ${player.name} (by ${club.name})?`, String(player.base || ""));
-  const finalBid = Math.max(0, Number(amtRaw) || 0);
-
-  state.players = state.players.map(p => p.id === id ? { ...p, status: "won", owner: club.slug, finalBid } : p);
-  state.log.push({ type: "lost", id, owner: club.slug, finalBid });
-  state.activeId = null; persist(); render();
-}
-
-
-function undo(){
-  const last = state.log.pop(); if (!last) return;
-  if (last.type==="won"){
-    state.players = state.players.map(p=>p.id===last.id?{...p,status:"pending",finalBid:undefined}:p);
-  } else {
-    state.players = state.players.map(p=>p.id===last.id?{...p,status:"pending"}:p);
-  }
-  persist(); render();
-}
-function updatePlayer(id, patch){ state.players = state.players.map(p=>p.id===id?{...p,...patch}:p); persist(); render(); }
-
-// -------- Import / Export ----------
-async function importFromCsvUrl(){
-  const url = (csvUrlEl?.value||"").trim();
-  if (!url){ alert("CSV URL is empty."); return; }
-  try {
-    const res = await fetch(url); const txt = await res.text(); const arr = parseCSV(txt);
-    if (!arr.length){ alert("No rows found in CSV."); return; }
-    state.players = arr.map(p=>{
-      const c = p.category || categoryFromRank(p.rank);
-      const baseVal = c===1?state.catBase.c1:c===2?state.catBase.c2:c===3?state.catBase.c3:c===4?state.catBase.c4:state.catBase.c5;
-      return { ...p, category:c, base: p.base>0?p.base:baseVal };
-    });
-    reapplyPreselectedIfAny();
-    state.queue = shuffle(state.players.filter(p=>p.status==="pending").map(p=>p.id));
-    state.activeId = null; persist(); render();
-  } catch(e){ alert("Failed to fetch CSV: "+e); }
-}
-function importFromPaste(){
-  const txt = (csvPasteEl?.value||"").trim();
-  if (!txt){ alert("Paste CSV is empty."); return; }
-  try {
-    const arr = parseCSV(txt);
-    if (!arr.length){ alert("No rows found in CSV."); return; }
-    state.players = arr.map(p=>{
-      const c = p.category || categoryFromRank(p.rank);
-      const baseVal = c===1?state.catBase.c1:c===2?state.catBase.c2:c===3?state.catBase.c3:c===4?state.catBase.c4:state.catBase.c5;
-      return { ...p, category:c, base: p.base>0?p.base:baseVal };
-    });
-    reapplyPreselectedIfAny();
-    state.queue = shuffle(state.players.filter(p=>p.status==="pending").map(p=>p.id));
-    state.activeId = null; persist(); render();
-  } catch(e){ alert("Parse error: "+e); }
-}
-function exportWon(){
-  const won = state.players.filter(p=>p.status==="won");
-  if (!won.length){ alert("No players won yet."); return; }
-  const rows = won.map(p=>({
-    name:p.name, rank:p.rank, category:p.category, role:p.role,
-    rating10:p.rating10, finalBid:p.finalBid, alumni:p.alumni||"", age:p.age||""
-  }));
-  const csv = csvExport(rows);
-  const blob = new Blob([csv],{type:"text/csv"}); const url = URL.createObjectURL(blob);
-  const a = document.createElement("a"); a.href=url; a.download="hrb_roster.csv"; a.click(); URL.revokeObjectURL(url);
-}
-
-// -------- Typeahead (Start Bid) ----------
-function onTypeahead(){
-  const q = (startNameEl.value||"").trim().toLowerCase();
-  if (q.length < 3){ startResultsEl.style.display="none"; startResultsEl.innerHTML=""; return; }
-  const matches = state.players
-    .filter(p => p.status==="pending" && (p.name||"").toLowerCase().includes(q))
-    .sort((a,b)=>a.rank-b.rank)
-    .slice(0,12);
-  if (!matches.length){ startResultsEl.style.display="none"; startResultsEl.innerHTML=""; return; }
-  const list = document.createElement("div"); list.className = "ta-list";
-  list.innerHTML = matches.map(p=>{
-    const cat = p.category || categoryFromRank(p.rank);
-    return `<div class="ta-item" data-id="${p.id}">
-      <b>${p.name}</b> <span class="ta-muted">#${p.rank} · Cat ${cat} · ${p.role}</span>
-    </div>`;
-  }).join("");
-  startResultsEl.innerHTML = ""; startResultsEl.appendChild(list);
-  startResultsEl.style.display = "";
-  list.querySelectorAll(".ta-item").forEach(el=>{
-    el.addEventListener("click", ()=>{
-      const id = el.getAttribute("data-id");
-      const p = state.players.find(x=>x.id===id);
-      if (!p) return;
-      state.activeId = p.id;
-      const cat = p.category || categoryFromRank(p.rank);
-      const baseVal = p.base>0 ? p.base :
-        (cat===1?state.catBase.c1:cat===2?state.catBase.c2:cat===3?state.catBase.c3:cat===4?state.catBase.c4:state.catBase.c5);
-      seedBaseEl.value = baseVal;
-      startResultsEl.style.display="none"; startResultsEl.innerHTML="";
-      persist(); render();
-    });
-  });
-}
-function onSetActiveFromTypeahead(){
-  const q = (startNameEl.value||"").trim().toLowerCase();
-  const p = state.players.find(x => x.status==="pending" && (x.name||"").toLowerCase()===q);
-  if (!p){ alert("Pick from dropdown first (click on the exact player)."); return; }
-  state.activeId = p.id;
-  const cat = p.category || categoryFromRank(p.rank);
-  const baseVal = p.base>0 ? p.base :
-    (cat===1?state.catBase.c1:cat===2?state.catBase.c2:cat===3?state.catBase.c3:cat===4?state.catBase.c4:state.catBase.c5);
-  seedBaseEl.value = baseVal;
-  persist(); render();
-}
-
-// -------- Render ----------
-function render(){
-  if (!appMain || appMain.style.display==="none") return;
-
-  remainingPointsEl.textContent = remainingPoints();
-  remainingSlotsEl.textContent = remainingSlots();
-  guardrailEl.classList.toggle("danger", !guardrailOK(0));
-  guardrailEl.innerHTML = `Guardrail: <b>${guardrailOK(0) ? "OK" : "At Risk"}</b>`;
-
-  playersCountEl.textContent = `(${state.players.length})`;
-  renderCompliance();
-  renderPlayersList();
-  renderLiveBid();
-  renderSelectedList();
-    renderOtherClubsPanel();
-
-}
-
-function renderCompliance(){
-  const c = evaluateRosterCompliance(state.players, state.constraints);
-  const ok = c.allMinOk;
-  complianceBarEl.className = "compliance " + (ok ? "ok" : "warn");
-  complianceBarEl.innerHTML = `
-    <div class="row" style="justify-content:space-between; margin-bottom:6px;">
-      <div><b>Roster Requirements</b></div>
-      <div>${ok ? "On Track" : "Incomplete"}</div>
-    </div>
-    ${c.results.map(r => `
-      <div class="comp-row">
-        <div>${r.role || "Any"}${r.batting_hand ? " · " + r.batting_hand + "-hand" : ""}${r.is_wk ? " · Wicket Keeper" : ""}</div>
-        <div><b>${r.count}</b> / min ${r.min_count ?? 0}${typeof r.max_count === "number" ? ` (max ${r.max_count})` : ""}</div>
-      </div>
-    `).join("")}
-  `;
-}
-
-async function renderPlayersList(){
-  playersListEl.innerHTML = "";
-  const withScores = state.players.map(p => ({ ...p, valueScore: computeValueScore(p, state.players, state.constraints) }));
-  withScores.forEach(p => {
-    const tier = tierFromScore(p.valueScore);
-    const div = document.createElement("div");
-    div.className = "item " + (p.status !== "pending" ? "disabled" : "");
-    div.innerHTML = `
-      <div class="title">
-        <div><b>${p.name}</b></div>
-        <div class="${tier.class}"><span>${tier.label}</span><span>•</span><span>${p.valueScore.toFixed(1)}</span></div>
-      </div>
-      <div class="meta">
-        #${p.rank} • Cat ${p.category} • ${p.role} • Rating10 ${p.rating10 ?? 0} • Base ${p.base}
-        ${p.is_wk ? " • WK" : ""}${p.batting_hand ? " • " + p.batting_hand + "-hand" : ""}
-        ${p.alumni ? " • " + p.alumni : ""}${p.age ? " • Age " + p.age : ""}
-      </div>
-      <div class="row" style="margin-top:6px;">
-        <button class="btn btn-ghost" data-action="set-active">Set Active</button>
-        ${p.status === "pending" ? `<button class="btn btn-ghost" data-action="mark-lost">Mark Lost</button>` : `<button class="btn btn-ghost" data-action="reopen">Reopen</button>`}
-        ${p.status === "won" ? `<span style="margin-left:auto;font-size:12px;color:#475569">Final: <b>${p.finalBid}</b></span>` : ""}
-      </div>
-      <div class="info-grid" style="margin-top:6px;">
-        <label class="info"><div class="k">Base</div><input data-edit="base" value="${p.base}" /></label>
-        <label class="info"><div class="k">Rating10</div><input data-edit="rating10" value="${p.rating10 ?? 0}" /></label>
-        <label class="info"><div class="k">Role</div><input data-edit="role" value="${p.role}" /></label>
-      </div>
-    `;
-    div.querySelector("[data-action='set-active']")?.addEventListener("click", () => { state.activeId = p.id; seedBaseEl.value = p.base; persist(); render(); });
-   div.querySelector("[data-action='mark-lost']")?.addEventListener("click", () => markLostToOtherClub(p.id));
-
-    div.querySelector("[data-action='reopen']")?.addEventListener("click", () => updatePlayer(p.id, { status:"pending", finalBid: undefined }));
-
-    div.querySelector("[data-edit='base']")?.addEventListener("change", e => updatePlayer(p.id, { base: toNum(e.target.value, p.base) }));
-    div.querySelector("[data-edit='rating10']")?.addEventListener("change", e => updatePlayer(p.id, { rating10: toNum(e.target.value, p.rating10) }));
-    div.querySelector("[data-edit='role']")?.addEventListener("change", e => updatePlayer(p.id, { role: String(e.target.value||p.role) }));
-
-    playersListEl.appendChild(div);
-  });
-}
-
-async function renderLiveBid(){
-  const p = state.players.find(x => x.id === state.activeId);
-  if (!p) { liveBidEl.innerHTML = `<div class="hint">Pick a player via Start Bid above or click <b>Next Player</b>.</div>`; return; }
-
-  const score = computeValueScore(p, state.players, state.constraints);
-  const tier = tierFromScore(score);
-
-  const basic = [`#${p.rank} · Cat ${p.category}`, p.role, `Rating10 ${p.rating10 ?? 0}`, p.is_wk?"WK":null, p.batting_hand?`${p.batting_hand}-hand`:null]
-    .filter(Boolean).join(" • ");
-  const extra = [p.alumni?`Alumni: ${p.alumni}`:null, p.dob?`DOB: ${p.dob}`:null, p.age?`Age: ${p.age}`:null].filter(Boolean).join(" • ");
-
-  liveBidEl.innerHTML = `
-    <div class="item">
-      <div class="title">
-        <div>
-          <div style="font-size:18px;font-weight:600">${p.name}</div>
-          <div class="meta">${basic}</div>
-          ${extra ? `<div class="meta" style="margin-top:2px">${extra}</div>` : ``}
-        </div>
-        <div class="${tier.class}"><span>${tier.label}</span><span>•</span><span>${score.toFixed(1)}</span></div>
-      </div>
-
-      <div class="info-grid" style="margin-top:8px;">
-        <div class="info"><div class="k">Base (cat/sheet)</div><div class="v">${p.base}</div></div>
-        <div class="info"><div class="k">Value Score</div><div class="v">${score.toFixed(1)}</div></div>
-      </div>
-
-      <div class="row" style="margin-top:8px;">
-        <label style="flex:1">Your Bid
-          <input type="number" id="yourBid" value="${p.base}" />
-          <div id="guardWarn" class="hint"></div>
-        </label>
-        <div class="col">
-          <button id="btn-bid-base" class="btn">Bid Base</button>
-          <button id="btn-plus10" class="btn btn-ghost">+10</button>
-        </div>
-      </div>
-
-      <div class="row" style="margin-top:8px;">
-        <button id="btn-mark-won" class="btn">Mark Won</button>
-        <button id="btn-pass" class="btn btn-ghost">Pass</button>
-        <button id="btn-skip" class="btn btn-ghost">Skip / Next</button>
-      </div>
-    </div>
-  `;
-   
-// Show pass panel for assignment
 async function wirePassPanelForPlayer(p) {
-  const passPanel = document.getElementById("passPanel");
-  const passClubInput = document.getElementById("passClubInput");
-  const passClubSelect = document.getElementById("passClubSelect");
-  const passBidAmount = document.getElementById("passBidAmount");
-  const passPanelMsg = document.getElementById("passPanelMsg");
-  const datalist = document.getElementById("clubNames");
-
+  const passPanel = $("passPanel");
+  const passClubInput = $("passClubInput");
+  const passClubSelect = $("passClubSelect");
+  const passBidAmount = $("passBidAmount");
+  const passPanelMsg = $("passPanelMsg");
+  const datalist = $("clubNames");
   if (!passPanel || !passClubInput || !passClubSelect || !passBidAmount || !datalist) return;
 
-  // 1) Make sure clubs are loaded (DB → state)
+  // ensure clubs available
   try {
-    if (!state.clubs || !state.clubs.length) {
-      if (typeof fetchClubs === "function") {
-        state.clubs = await fetchClubs();
-        persist();
-      }
+    if ((!state.clubs || !state.clubs.length) && sb) {
+      state.clubs = await fetchClubs();
+      persist();
     }
   } catch (e) {
     console.warn("fetchClubs failed:", e);
   }
 
   const others = getOtherClubs();
+  passPanel.style.display = "";
+  passBidAmount.value = String(p.base || 0);
+  passPanelMsg.textContent = "";
 
-  // 2) If no other clubs yet, show guidance and bail
   if (!others.length) {
-    passPanel.style.display = "";
-    passPanelMsg.textContent = "No other clubs found. Create clubs first in the Add Club section.";
-    // still prefill bid amount
-    passBidAmount.value = String(p.base || 0);
-    // empty lists
     datalist.innerHTML = "";
     passClubSelect.innerHTML = `<option value="">-- no clubs yet --</option>`;
+    passPanelMsg.textContent = "No other clubs found. Create clubs first in the Add Club section.";
     return;
   }
 
-  // 3) Populate the typeahead datalist
   datalist.innerHTML = others.map(c => `<option value="${c.name}"></option>`).join("");
-
-  // 4) Populate the real <select>
   passClubSelect.innerHTML = `<option value="">-- choose club --</option>` +
     others.map(c => `<option value="${c.slug}">${c.name}</option>`).join("");
 
-  // Prefill
-  passPanel.style.display = "";
-  passPanelMsg.textContent = "";
-  passBidAmount.value = String(p.base || 0);
-  passClubInput.value = "";
-  passClubSelect.value = "";
-
-  // 5) Assign handler: prefer <select>, else use typeahead (case-insensitive)
-  const assignBtn = document.getElementById("btn-assign-to-club");
-  assignBtn?.addEventListener("click", async () => {
+  // Assign (attach once per render)
+  const assignBtn = $("btn-assign-to-club");
+  assignBtn?.replaceWith(assignBtn.cloneNode(true)); // drop previous listeners
+  const freshAssign = $("btn-assign-to-club");
+  freshAssign?.addEventListener("click", async () => {
     passPanelMsg.textContent = "";
 
-    // pick club either from <select> or typeahead
     let club = null;
-
     if (passClubSelect.value) {
       club = others.find(c => c.slug === passClubSelect.value);
     } else if (passClubInput.value.trim()) {
       const name = passClubInput.value.trim().toLowerCase();
-      club = others.find(c => (c.name || "").toLowerCase() === name);
-      // loose match: startsWith if exact not found
-      if (!club) {
-        club = others.find(c => (c.name || "").toLowerCase().startsWith(name));
-      }
+      club = others.find(c => (c.name || "").toLowerCase() === name) ||
+             others.find(c => (c.name || "").toLowerCase().startsWith(name));
     }
+    if (!club) { passPanelMsg.textContent = "Pick a valid club using dropdown or start typing the club name."; return; }
 
-    if (!club) {
-      passPanelMsg.textContent = "Pick a valid club using dropdown or start typing the club name.";
-      return;
-    }
+    const winningBid = Math.max(0, toNum(passBidAmount.value, p.base));
 
-    const winningBid = Math.max(0, Number(passBidAmount.value) || 0);
-
-    // Local update
+    // local update
     state.players = state.players.map(x =>
       x.id === p.id ? ({ ...x, status: "won", owner: club.slug, finalBid: winningBid }) : x
     );
@@ -879,26 +349,53 @@ async function wirePassPanelForPlayer(p) {
     state.activeId = null;
     persist();
 
-    // DB budget adjust (best-effort)
+    // db budget adjust
     try {
-      if (club.id && typeof adjustBudgetDB === "function") {
-        await adjustBudgetDB({ club_id: club.id, delta: -winningBid });
+      if (club.id && sb) {
+        await updateBudgetDB(club.id, -winningBid);
       }
-      if (typeof fetchClubs === "function") {
-        state.clubs = await fetchClubs(); // refresh budget_left
+      if (sb) {
+        state.clubs = await fetchClubs();
         persist();
       }
     } catch (e) {
-      console.warn("adjustBudgetDB/fetchClubs failed:", e);
+      console.warn("updateBudgetDB/fetchClubs failed:", e);
     }
 
     render();
-  }, { once: true });
+  });
 }
 
+async function renderLiveBid(){
+  const live = $("liveBid");
+  if (!live) return;
 
-  const bidInput = document.getElementById("yourBid");
-  const warn = document.getElementById("guardWarn");
+  const p = (state.players || []).find(x => x.id === state.activeId);
+  if (!p) { live.innerHTML = `<div class="hint">Pick a player via <b>Start Bid</b> above.</div>`; $("passPanel")?.style && ( $("passPanel").style.display = "none"); return; }
+
+  live.innerHTML = `
+    <div class="card" style="padding:12px">
+      <div class="row" style="justify-content:space-between;gap:8px">
+        <div>
+          <div class="title"><b>${p.name || "-"}</b></div>
+          <div class="meta">Cat ${p.category ?? "-"} · Rank ${p.rank ?? "-"} · ${p.role || ""}</div>
+        </div>
+        <div class="meta">Base: <b>${p.base ?? "-"}</b></div>
+      </div>
+      <div class="row" style="gap:6px;margin-top:8px">
+        <input id="bidInput" type="number" placeholder="${p.base ?? 0}" style="min-width:140px" />
+        <button class="btn" id="btn-bid-base">Base</button>
+        <button class="btn" id="btn-plus10">+10</button>
+        <button class="btn primary" id="btn-mark-won">Mark Won</button>
+        <button class="btn" id="btn-pass">Pass</button>
+      </div>
+      <div id="bidWarn" class="hint" style="margin-top:6px"></div>
+    </div>
+  `;
+
+  const bidInput = $("bidInput");
+  const warn = $("bidWarn");
+
   function validate(){
     const bid = toNum(bidInput.value, p.base);
     const ok = guardrailOK(bid);
@@ -906,58 +403,50 @@ async function wirePassPanelForPlayer(p) {
     return ok;
   }
   validate();
-  document.getElementById("btn-bid-base")?.addEventListener("click", ()=>{ bidInput.value = p.base; validate(); });
-  document.getElementById("btn-plus10")?.addEventListener("click", ()=>{ bidInput.value = String(Math.max(p.base, toNum(bidInput.value, p.base)+10)); validate(); });
-  document.getElementById("btn-mark-won")?.addEventListener("click", ()=>{
+
+  $("btn-bid-base")?.addEventListener("click", ()=>{ bidInput.value = p.base; validate(); });
+  $("btn-plus10")?.addEventListener("click", ()=>{ bidInput.value = String(Math.max(p.base, toNum(bidInput.value, p.base)+10)); validate(); });
+  $("btn-mark-won")?.addEventListener("click", ()=>{
     const bid = toNum(bidInput.value, p.base);
     if (!guardrailOK(bid)) { alert("Guardrail violated. Reduce bid."); return; }
     markWon(p.id, bid);
   });
-  document.getElementById("btn-pass")?.addEventListener("click", () => {
-  // Just ensure the passPanel is visible; assignment happens via its "Assign" button
-  const passPanel = document.getElementById("passPanel");
-  if (passPanel) passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
-    
-});
- 
+  $("btn-pass")?.addEventListener("click", () => {
+    const passPanel = $("passPanel");
+    if (passPanel) passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, { once: true });
+
+  await wirePassPanelForPlayer(p);
 }
 
-function renderSelectedList(){
-  const won = state.players.filter(p=>p.status==="won").sort((a,b)=>(b.finalBid||0)-(a.finalBid||0));
-  if (!won.length){ selectedListEl.innerHTML = `<div class="hint">No players selected yet.</div>`; return; }
-  selectedListEl.innerHTML = won.map(p=>{
-    const l1 = `${p.name} — #${p.rank} · Cat ${p.category} · ${p.role}${p.is_wk?" (WK)":""}`;
-    const l2 = [`Rating10 ${p.rating10 ?? 0}`, p.alumni?`Alumni: ${p.alumni}`:null, p.age?`Age: ${p.age}`:null, `Bid: ${p.finalBid}`]
-      .filter(Boolean).join(" • ");
-    return `<div class="item">
-      <div class="title"><div><b>${l1}</b></div></div>
-      <div class="meta">${l2}</div>
-    </div>`;
-  }).join("");
+function render() {
+  renderPlayersList();
+  renderOtherClubsPanel();
+  renderLiveBid();
 }
+
+/* ===========================
+   Create Club UI wiring
+=========================== */
 function wireCreateClubUI() {
-  const btn = document.getElementById("btnCreateClub");
-  const nameEl = document.getElementById("clubName");
-  const logoEl = document.getElementById("clubLogo");
-  const budgetEl = document.getElementById("clubBudget");
-  const msgEl = document.getElementById("clubCreateMsg");
-
+  const btn = $("btnCreateClub");
+  const nameEl = $("clubName");
+  const logoEl = $("clubLogo");
+  const budgetEl = $("clubBudget");
+  const msgEl = $("clubCreateMsg");
   if (!btn || !nameEl || !budgetEl) return;
 
-  // Remove any previous handler to avoid duplicates
   btn.onclick = null;
   btn.addEventListener("click", async () => {
     msgEl.textContent = "";
     const name = (nameEl.value || "").trim();
     const logo = (logoEl?.value || "").trim();
     const budget = (budgetEl.value || "").trim();
-
     if (!name) { msgEl.textContent = "Enter a club name."; return; }
 
     try {
       await addClubAndRefresh({ name, logo_url: logo, starting_budget: budget });
-      // clear inputs
-      nameEl.value = ""; logoEl.value = ""; budgetEl.value = "";
+      nameEl.value = ""; if (logoEl) logoEl.value = ""; budgetEl.value = "";
       msgEl.textContent = "Club created.";
       renderOtherClubsPanel();
     } catch (e) {
@@ -967,8 +456,61 @@ function wireCreateClubUI() {
   });
 }
 
-// Call this once after the DOM is ready & sections are rendered
-document.addEventListener("DOMContentLoaded", () => {
-  try { wireCreateClubUI(); } catch {}
-});
-await wirePassPanelForPlayer(p);
+/* ===========================
+   Demo: minimal import helpers
+=========================== */
+/* If you already have an Import section that populates state.players, keep it.
+   Below is an optional, simple CSV URL importer. Put your CSV URL into #csvUrl and click #btnImportCsv
+   (columns: id,name,base,category,rank,role)
+*/
+function wireCsvImportUI() {
+  const urlEl = $("csvUrl");
+  const btn = $("btnImportCsv");
+  const msg = $("importMsg");
+  if (!btn || !urlEl) return;
+  btn.onclick = null;
+  btn.addEventListener("click", async () => {
+    msg && (msg.textContent = "");
+    const url = (urlEl.value || "").trim();
+    if (!url) { msg && (msg.textContent = "Enter CSV URL"); return; }
+    try {
+      const resp = await fetch(url);
+      const txt = await resp.text();
+      const rows = txt.trim().split(/\r?\n/);
+      const header = rows.shift().split(",");
+      const idx = (name) => header.findIndex(h => h.trim().toLowerCase() === name);
+      const idI = idx("id"), nameI = idx("name"), baseI = idx("base"), catI = idx("category"), rankI = idx("rank"), roleI = idx("role");
+      state.players = rows.map((r, i) => {
+        const cols = r.split(",");
+        return {
+          id: cols[idI] || String(i+1),
+          name: cols[nameI] || `Player ${i+1}`,
+          base: toNum(cols[baseI], 500),
+          category: cols[catI] || "",
+          rank: toNum(cols[rankI], i+1),
+          role: cols[roleI] || "",
+          status: "new"
+        };
+      });
+      persist();
+      render();
+      msg && (msg.textContent = "Players imported.");
+    } catch (e) {
+      console.error(e);
+      msg && (msg.textContent = "Failed to import CSV.");
+    }
+  });
+}
+
+/* ===========================
+   Boot
+=========================== */
+async function boot() {
+  load();
+  await ensureMyClubSeeded();
+  wireCreateClubUI();
+  wireCsvImportUI();
+  render();
+}
+
+document.addEventListener("DOMContentLoaded", () => { boot(); });
