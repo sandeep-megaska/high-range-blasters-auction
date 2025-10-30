@@ -394,7 +394,8 @@ async function renderLiveBid(){
       <div class="row" style="justify-content:space-between;gap:8px">
         <div>
           <div class="title"><b>${p.name || "-"}</b></div>
-          <div class="meta">Cat ${p.category ?? "-"} · Rank ${p.rank ?? "-"} · ${p.role || ""}</div>
+          <div class="meta">Cat ${p.category ?? "-"} · ${p.role || ""}</div>
+
         </div>
         <div class="meta">Base: <b>${p.base ?? "-"}</b></div>
       </div>
