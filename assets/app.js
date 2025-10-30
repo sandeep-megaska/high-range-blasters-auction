@@ -38,8 +38,7 @@ let state = {
   log: [],
   constraints: DEFAULT_CONSTRAINTS,
 
-  // categories (editable in settings)
-  catBase: { c1:1500, c2:1200, c3:900, c4:700, c5:500 },
+ catBase: { c1:1500, c2:1200, c3:900, c4:700, c5:500 },
 
   // auth/setup
   auth: { loggedIn: false },
@@ -48,18 +47,16 @@ let state = {
     playersCap: 15,
     overallPoints: 15000,
     catBase: { c1:1500, c2:1200, c3:900, c4:700, c5:500 },
-    guardMin: 0, // 0 => auto from Cat5
+    guardMin: 0,
     preselectedName: "",
     preselectedBid: 0
-  }
-  // (these are currently OUTSIDE the object → syntax error)
-  // clubs & ownership
-  myClubSlug: "high-range-blasters",
-  clubs: [
-    // We seed HRB automatically in load() if missing; leave this empty by default.
-  ],
+  },
 
+  // ✅ clubs & ownership (keep these INSIDE)
+  myClubSlug: "high-range-blasters",
+  clubs: [] // HRB is auto-seeded in load() via ensureMyClubSeeded()
 };
+  
  
 // -------- DOM ----------
 const $ = s => document.querySelector(s);
