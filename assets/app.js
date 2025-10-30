@@ -315,7 +315,7 @@ function parseCSVPlayers(raw) {
   const iWK     = idx("wk","wicket keeper","is_wk","keeper");
   const iBase   = idx("base","seed","start bid","seed base","base value");
   const iCat    = idx("category","cat");
-  // NEW: phone capture (covers common headings)
+  // NEW: phone capture covers common headings
   const iPhone  = idx("phone","phone number","mobile","mobile number","contact","whatsapp","whatsapp number","ph");
 
   const yes = (v) => /^(true|yes|y|1)$/i.test(String(v || "").trim());
