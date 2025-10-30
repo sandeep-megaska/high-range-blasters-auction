@@ -470,61 +470,92 @@ async function wirePassPanelForPlayer(p) {
 }
 
 
-async function renderLiveBid(){
-  const live = $("liveBid");
+// Helper: get active player by id kept in state.activePlayerId
+function getActivePlayer() {
+  const id = state.activePlayerId;
+  if (!id) return null;
+  return (state.players || []).find(p => String(p.id) === String(id)) || null;
+}
+
+async function renderLiveBid() {
+  const live = document.getElementById("liveBid"); // use your $() if you prefer
   if (!live) return;
 
-  const p = (state.players || []).find(x => x.id === state.activeId);
+  const p = getActivePlayer();
   if (!p) {
-    live.innerHTML = `<div class="hint">Pick a player via <b>Start Bid</b> above.</div>`;
-    if ($("passPanel")) $("passPanel").style.display = "none";
+    live.innerHTML = `
+      <div class="hint">No active player. Use the Name picker to select the announced player.</div>
+    `;
     return;
   }
-// --- NEW advice panel (safe strings) ---
-const pr = classifyPriority(p.rating);
-const need = rosterNeeds();
 
-const adviceParts = [];
-if (pr === "must")      adviceParts.push("High rating – recommended to bid.");
-else if (pr === "try")  adviceParts.push("Good rating – consider bidding.");
-else                    adviceParts.push("Low priority – bid only if price is right.");
-
-if (p.is_wk && need.wkNeed > 0) adviceParts.push(`Team still needs WKs (${need.wkNeed} remaining).`);
-if (isRightHand(p.batting_hand) && need.rhNeed > 0) adviceParts.push(`Team needs Right-hand batters (${need.rhNeed} remaining).`);
-
-const adviceHTML =
-  `<div class="card" style="margin-top:8px;padding:10px;background:#f8fafc;border-left:4px solid #0ea5e9">
-     <div class="row" style="gap:8px;align-items:center">
-       ${priorityBadge(pr)}
-       <span>${adviceParts.join(" ")}</span>
-     </div>
-   </div>`;
-
-live.insertAdjacentHTML("beforeend", adviceHTML);
+  // Build compact meta (no base unless present in CSV)
+  const bits = [];
+  if (p.alumni)   bits.push(p.alumni);
+  if (p.rating != null) bits.push(`Rating ${p.rating}`);
+  if (p.category) bits.push(`Cat ${p.category}`);
+  if (p.role)     bits.push(p.role);
+  const meta = bits.join(" · ");
 
   live.innerHTML = `
-    <div class="card" style="padding:12px">
+    <div class="card" style="padding:12px;">
       <div class="row" style="justify-content:space-between;gap:8px">
         <div>
-          <div class="title"><b>${p.name || "-"}</b></div>
-          <div class="meta">Cat ${p.category ?? "-"} · ${p.role || ""}</div>
-
+          <div style="font-size:18px;font-weight:700">${p.name}</div>
+          ${meta ? `<div class="meta">${meta}</div>` : ``}
         </div>
-        <div class="meta">Base: <b>${p.base ?? "-"}</b></div>
       </div>
-      <div class="row" style="gap:6px;margin-top:8px">
-        <input id="bidInput" type="number" placeholder="${p.base ?? 0}" style="min-width:140px" />
-        <button class="btn" id="btn-bid-base">Base</button>
-        <button class="btn" id="btn-plus10">+10</button>
-        <button class="btn primary" id="btn-mark-won">Mark Won</button>
-        <button class="btn" id="btn-pass">Pass</button>
+
+      <div class="row" style="gap:8px;margin-top:10px;align-items:flex-end;flex-wrap:wrap">
+        <label style="flex:0 1 180px">Bid Amount
+          <input id="bidInput" type="number" placeholder="e.g. 900" />
+        </label>
+        <button id="btn-mark-won" class="btn">HRB Won</button>
+        <button id="btn-pass" class="btn btn-ghost">Pass / Assign to other club</button>
       </div>
-      <div id="bidWarn" class="hint" style="margin-top:6px"></div>
     </div>
   `;
 
-  const bidInput = $("bidInput");
-  const warn = $("bidWarn");
+  // Optional: show the advisory panel (rating/WK/right-hand needs) if you added classifyPriority etc.
+  try {
+    if (typeof classifyPriority === "function" && typeof rosterNeeds === "function" && typeof priorityBadge === "function") {
+      const pr = classifyPriority(p.rating);
+      const need = rosterNeeds();
+      const adviceParts = [];
+      if (pr === "must") adviceParts.push("High rating – recommended to bid.");
+      else if (pr === "try") adviceParts.push("Good rating – consider bidding.");
+      else adviceParts.push("Low priority – bid only if price is right.");
+      if (p.is_wk && need.wkNeed > 0) adviceParts.push(`Team still needs WKs (${need.wkNeed} remaining).`);
+      if (isRightHand && isRightHand(p.batting_hand) && need.rhNeed > 0) adviceParts.push(`Team needs Right-hand batters (${need.rhNeed} remaining).`);
+
+      const adviceHTML =
+        `<div class="card" style="margin-top:8px;padding:10px;background:#f8fafc;border-left:4px solid #0ea5e9">
+           <div class="row" style="gap:8px;align-items:center">
+             ${priorityBadge(pr)}
+             <span>${adviceParts.join(" ")}</span>
+           </div>
+         </div>`;
+      live.insertAdjacentHTML("beforeend", adviceHTML);
+    }
+  } catch (_) {}
+
+  // Wire buttons
+  const bidEl = document.getElementById("bidInput");
+  document.getElementById("btn-mark-won")?.addEventListener("click", () => {
+    const price = bidEl ? bidEl.value : "";
+    markWon(p.id, price);
+  });
+
+  document.getElementById("btn-pass")?.addEventListener("click", () => {
+    const passPanel = document.getElementById("passPanel");
+    if (passPanel) {
+      passPanel.style.display = "block";
+      passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    // prepare Assign panel for this player (datalist + Assign button)
+    if (typeof wirePassPanelForPlayer === "function") wirePassPanelForPlayer(p);
+  });
+}
 
   function validate(){
     const bid = toNum(bidInput.value, p.base);
