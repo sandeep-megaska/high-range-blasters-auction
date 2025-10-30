@@ -71,4 +71,19 @@ textarea { resize: vertical; }
 }
 .modal h2 { margin: 0 0 6px; font-size: 18px; }
 .modal .error { margin-top: 8px; color: #dc2626; font-size: 12px; }
+/* Brand */
+.brand { display:flex; align-items:center; gap:10px; min-width:0; }
+.brand-logo { height:32px; width:auto; display:block; }
+@media (min-width: 768px) { .brand-logo { height:36px; } }
+
+/* Modal widths */
+.modal { max-width: 920px; margin: 18px auto; }
+
+/* Typeahead */
+.typeahead { border:1px solid #e5e7eb; background:#fff; border-radius:12px; padding:10px; }
+.ta-menu { position:relative; margin-top:6px; }
+.ta-menu .ta-list { position:absolute; z-index:20; background:#fff; border:1px solid #e5e7eb; border-radius:10px; width:100%; max-height:220px; overflow:auto; }
+.ta-item { padding:8px 10px; cursor:pointer; }
+.ta-item:hover { background:#f1f5f9; }
+.ta-muted { color:#64748b; font-size:12px; }
 
