@@ -3,6 +3,46 @@
    If you want Supabase, set window.ENV = { SUPABASE_URL, SUPABASE_ANON_KEY } in index.html
    and load the UMD: <script src="https://unpkg.com/@supabase/supabase-js@2"></script> BEFORE this module.
 */
+// ===== HRB rules (tweak anytime) =====
+const RULES = {
+  minWK: 2,              // need at least 2 wicket keepers
+  minRightBat: 2,        // need at least 2 right-hand batters
+  ratingThresholds: {    // interpret your sheet's rating (e.g., 1–10)
+    must: 9,             // >= 9  → Must bid
+    try:  7              // 7–8.9 → Try
+  }
+};
+
+// interpret batting-hand strings
+function isRightHand(battingHand) {
+  const s = (battingHand || "").toLowerCase();
+  return /right/.test(s) || /\brhb\b/.test(s) || s === "r";
+}
+
+// current HRB roster needs (based on already won players)
+function rosterNeeds() {
+  const mine = (state.players || []).filter(p => p.status === "won" && p.owner === state.myClubSlug);
+  const wkHave = mine.filter(p => p.is_wk).length;
+  const rhHave = mine.filter(p => isRightHand(p.batting_hand)).length;
+  return {
+    wkNeed: Math.max(0, RULES.minWK - wkHave),
+    rhNeed: Math.max(0, RULES.minRightBat - rhHave)
+  };
+}
+
+function classifyPriority(rating) {
+  if (rating == null) return "—";
+  if (rating >= RULES.ratingThresholds.must) return "must"; // Must bid
+  if (rating >= RULES.ratingThresholds.try)  return "try";  // Try
+  return "last";                                           // Last preference
+}
+
+function priorityBadge(priority) {
+  const map = { must: "#166534", try: "#1d4ed8", last: "#6b7280", "—": "#6b7280" };
+  const label = { must: "Must bid", try: "Try", last: "Last pref.", "—": "No rating" }[priority] || priority;
+  const bg = map[priority] || "#6b7280";
+  return `<span style="display:inline-block;padding:2px 6px;border-radius:999px;font-size:12px;color:#fff;background:${bg}">${label}</span>`;
+}
 
 /* ===========================
    State & Persistence
@@ -253,10 +293,22 @@ function renderPlayersList() {
            <div class="meta">Cat ${p.category ?? "-"} · ${p.role || ""}</div>
 
           </div>
-          <div class="meta">
-            Base: <b>${p.base ?? "-"}</b><br/>
-            ${p.status === "won" ? `Won by <b>${ownerName}</b> @ <b>${p.finalBid ?? "-"}</b>` : (p.status === "lost" ? `Passed` : ``)}
-          </div>
+          const pr = classifyPriority(p.rating);
+const need = rosterNeeds();
+const needBits = [
+  (p.is_wk && need.wkNeed > 0) ? `Need WK (${need.wkNeed} left)` : "",
+  (isRightHand(p.batting_hand) && need.rhNeed > 0) ? `Need Right-hand bat (${need.rhNeed} left)` : ""
+].filter(Boolean).join(" · ");
+
+<div class="meta">
+  ${priorityBadge(pr)}
+  ${p.rating != null ? ` · Rating ${p.rating}` : ""}
+  ${p.category ? ` · Cat ${p.category}` : ""}
+  ${p.role ? ` · ${p.role}` : ""}
+  ${p.base != null ? ` · Seed ${p.base}` : ""}
+  ${needBits ? ` · <span style="color:#065f46">${needBits}</span>` : ""}
+</div>
+
         </div>
         <div class="row" style="gap:6px;margin-top:8px">
           <button class="btn" data-action="start" data-id="${p.id}">Start Bid</button>
@@ -388,6 +440,24 @@ async function renderLiveBid(){
     if ($("passPanel")) $("passPanel").style.display = "none";
     return;
   }
+const pr = classifyPriority(p.rating);
+const need = rosterNeeds();
+const advice = [];
+if (pr === "must") advice.push("High rating – recommended to bid.");
+else if (pr === "try") advice.push("Good rating – consider bidding.");
+else advice.push("Low priority – bid only if price is right.");
+
+if (p.is_wk && need.wkNeed > 0) advice.push(`Team still needs WKs (${need.wkNeed} remaining).`);
+if (isRightHand(p.batting_hand) && need.rhNeed > 0) advice.push(`Team needs Right-hand batters (${need.rhNeed} remaining).`);
+
+live.insertAdjacentHTML("beforeend", `
+  <div class="card" style="margin-top:8px;padding:10px;background:#f8fafc;border-left:4px solid #0ea5e9">
+    <div class="row" style="gap:8px;align-items:center">
+      ${priorityBadge(pr)}
+      <span>${advice.join(" ")}</span>
+    </div>
+  </div>
+`);
 
   live.innerHTML = `
     <div class="card" style="padding:12px">
@@ -512,22 +582,29 @@ function normalizeHeader(h) {
 //   Category (optional)
 //   Role (optional)
 //   Bid / Start Bid / Seed (optional)  <-- if missing, we leave it empty
+// STRICT parser — your sheet is the source of truth.
+// Recognized headers (case/spacing doesn't matter):
+//   Name / Player Name (required)
+//   Rating / Rank / Rating10 / Grade (we store in .rating)
+//   Role / Playing Role / Type (optional)
+//   Batting Hand / Batting_Hand / Hand (optional; "Right Hand Bat", "RHB", "Right")
+//   WK / Wicket Keeper / Is_WK (optional; yes/true/1 = keeper)
+//   Base / Seed / Start Bid (optional; if absent -> base=null)
 function parseCSVPlayers(raw) {
   const rows = splitCsv(raw).filter(r => r.some(c => String(c).trim() !== ""));
   if (!rows.length) return [];
 
-  // find header
+  // pick header row
   const headerRowIdx = rows.findIndex(r => {
     const h = r.map(normalizeHeader);
-    const hits = ["name","player name","rank"].filter(k => h.includes(k)).length;
-    return hits >= 2; // must at least have name + rank
+    return h.includes("name") || h.includes("player name") || h.includes("player");
   });
   if (headerRowIdx < 0) return [];
 
   const header = rows[headerRowIdx].map(normalizeHeader);
-  const body = rows.slice(headerRowIdx + 1);
+  const body   = rows.slice(headerRowIdx + 1);
 
-  const idxOf = (...aliases) => {
+  const idx = (...aliases) => {
     for (const a of aliases) {
       const i = header.indexOf(a);
       if (i >= 0) return i;
@@ -535,31 +612,43 @@ function parseCSVPlayers(raw) {
     return -1;
   };
 
-  const iName = idxOf("name","player name","player");
-  const iRank = idxOf("rank","#","s no","s. no","serial","sr no");
-  const iCat  = idxOf("category","cat");
-  const iRole = idxOf("role","playing role","type");
-  const iBid  = idxOf("bid","start bid","seed","seed base","base value");
+  const iName   = idx("name","player name","player");
+  const iRate   = idx("rating","rank","rating10","grade");
+  const iRole   = idx("role","playing role","type");
+  const iHand   = idx("batting hand","batting_hand","hand");
+  const iWK     = idx("wk","wicket keeper","is_wk","keeper");
+  const iBase   = idx("base","seed","start bid","seed base","base value");
+  const iCat    = idx("category","cat");
+
+  const yes = (v) => /^(true|yes|y|1)$/i.test(String(v || "").trim());
 
   const players = [];
   body.forEach((cols) => {
     const name = (cols[iName] || "").trim();
     if (!name) return;
-    const rank = Number(cols[iRank]) || null;
-    const category = (iCat >= 0 ? String(cols[iCat]).trim() : "");
-    const role     = (iRole>= 0 ? String(cols[iRole]).trim() : "");
-    const seedBid  = (iBid >= 0 ? Number(cols[iBid]) : null);
+
+    const ratingRaw = iRate >= 0 ? String(cols[iRate]).trim() : "";
+    const rating = ratingRaw === "" ? null : Number(ratingRaw); // use your value as-is
+
+    const role   = iRole >= 0 ? String(cols[iRole]).trim() : "";
+    const hand   = iHand >= 0 ? String(cols[iHand]).trim() : "";
+    const isWK   = iWK  >= 0 ? yes(cols[iWK]) : /wk|keeper/i.test(role); // fallback: role contains WK
+    const base   = iBase >= 0 && String(cols[iBase]).trim() !== "" ? Number(cols[iBase]) : null;
+    const cat    = iCat  >= 0 ? String(cols[iCat]).trim() : "";
+
     players.push({
       id: String(players.length + 1),
       name,
-      // NOTICE: we DO NOT create any base if it’s not in the sheet
-      base: (Number.isFinite(seedBid) ? seedBid : null),
-      rank,
-      category,
+      rating,               // used for priority
       role,
-      status: "new",
+      batting_hand: hand,
+      is_wk: !!isWK,
+      base,                 // shown only if present
+      category: cat,
+      status: "new"
     });
   });
+
   return players;
 }
 
