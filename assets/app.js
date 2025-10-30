@@ -60,12 +60,7 @@ let state = {
   ],
 
 };
-  // clubs & ownership
-  myClubSlug: "high-range-blasters",
-  clubs: [
-    // We seed HRB automatically in load() if missing; leave this empty by default.
-  ],
-
+ 
 // -------- DOM ----------
 const $ = s => document.querySelector(s);
 // Views
