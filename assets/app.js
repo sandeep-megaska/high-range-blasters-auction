@@ -925,7 +925,7 @@ async function wirePassPanelForPlayer(p) {
   const passPanel = document.getElementById("passPanel");
   if (passPanel) passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
 });
-await wirePassPanelForPlayer(p);
+
 }
 
 function renderSelectedList(){
