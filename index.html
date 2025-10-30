@@ -243,16 +243,26 @@
     </footer>
   </div>
 
-  <script type="module">
-    import "./assets/utils.js";
-    import "./assets/constraints.js";
-    import "./assets/supabaseClient.js";
-    import "./assets/app.js";
-  </script>
-  <script type="module">
+ <script type="module">
+  function $(id){ return document.getElementById(id); }
+  function isHidden(el){ return !el || el.offsetParent === null; }
+
+  function showMainAppIfNeeded(targetId){
+    // If Live Bid is requested but appMain is hidden, reveal it and hide modals
+    if (targetId === "liveBid") {
+      const appMain = $("appMain");
+      if (appMain && getComputedStyle(appMain).display === "none") {
+        // hide login/settings if they’re up
+        const login = $("loginView"); if (login) login.style.display = "none";
+        const settings = $("settingsView"); if (settings) settings.style.display = "none";
+        appMain.style.display = "grid"; // was none
+      }
+    }
+  }
+
   function scrollToId(id, tries = 12) {
-    const el = document.getElementById(id);
-    if (el) {
+    const el = $(id);
+    if (el && !isHidden(el)) {
       el.scrollIntoView({ behavior: "smooth", block: "start" });
       return true;
     }
@@ -261,30 +271,39 @@
   }
 
   function wireHashScrolling() {
-    // handle <a href="#..."> and absolute URLs that end with #...
     document.querySelectorAll('a[href*="#"]').forEach(a => {
       a.addEventListener("click", (e) => {
-        const href = a.getAttribute("href");
-        const hash = href?.includes("#") ? href.split("#").pop() : "";
-        if (!hash) return;
-        e.preventDefault();                     // avoid default jump (in case a SPA blocks it)
-        history.pushState(null, "", "#" + hash);
-        scrollToId(hash);
+        const href = a.getAttribute("href") || "";
+        const id = href.includes("#") ? href.split("#").pop() : "";
+        if (!id) return;
+        e.preventDefault();
+        history.pushState(null, "", "#" + id);
+        showMainAppIfNeeded(id);
+        // try a couple times in case Live Bid renders after showing appMain
+        setTimeout(() => scrollToId(id), 0);
+        setTimeout(() => scrollToId(id), 150);
       });
     });
 
-    // support back/forward hash navigation
     window.addEventListener("hashchange", () => {
       const id = (location.hash || "").slice(1);
-      if (id) scrollToId(id);
+      if (!id) return;
+      showMainAppIfNeeded(id);
+      scrollToId(id);
     });
 
-    // if page loads with a hash, scroll after first paint
     const initial = (location.hash || "").slice(1);
-    if (initial) setTimeout(() => scrollToId(initial), 0);
+    if (initial) {
+      showMainAppIfNeeded(initial);
+      setTimeout(() => scrollToId(initial), 0);
+    }
   }
 
-  // call after DOM is ready
+  // Make sure the target doesn't hide under the header
+  const style = document.createElement("style");
+  style.textContent = `#liveBid { scroll-margin-top: 80px; }`;
+  document.head.appendChild(style);
+
   document.addEventListener("DOMContentLoaded", wireHashScrolling);
 </script>
 
