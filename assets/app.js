@@ -753,46 +753,107 @@ function renderLiveBid(){
     </div>
   `;
 // Show pass panel for assignment
-const passPanel = document.getElementById("passPanel");
-const passClubInput = document.getElementById("passClubInput");
-const passBidAmount = document.getElementById("passBidAmount");
-const passPanelMsg = document.getElementById("passPanelMsg");
-const datalist = document.getElementById("clubNames");
+async function wirePassPanelForPlayer(p) {
+  const passPanel = document.getElementById("passPanel");
+  const passClubInput = document.getElementById("passClubInput");
+  const passClubSelect = document.getElementById("passClubSelect");
+  const passBidAmount = document.getElementById("passBidAmount");
+  const passPanelMsg = document.getElementById("passPanelMsg");
+  const datalist = document.getElementById("clubNames");
 
-if (passPanel && passClubInput && passBidAmount && datalist) {
-  passPanel.style.display = "";
-  passBidAmount.value = String(p.base || 0);
+  if (!passPanel || !passClubInput || !passClubSelect || !passBidAmount || !datalist) return;
 
-  // Populate datalist with other clubs (exclude HRB)
-  const others = (state.clubs || []).filter(c => c.slug !== state.myClubSlug);
+  // 1) Make sure clubs are loaded (DB → state)
+  try {
+    if (!state.clubs || !state.clubs.length) {
+      if (typeof fetchClubs === "function") {
+        state.clubs = await fetchClubs();
+        persist();
+      }
+    }
+  } catch (e) {
+    console.warn("fetchClubs failed:", e);
+  }
+
+  const others = getOtherClubs();
+
+  // 2) If no other clubs yet, show guidance and bail
+  if (!others.length) {
+    passPanel.style.display = "";
+    passPanelMsg.textContent = "No other clubs found. Create clubs first in the Add Club section.";
+    // still prefill bid amount
+    passBidAmount.value = String(p.base || 0);
+    // empty lists
+    datalist.innerHTML = "";
+    passClubSelect.innerHTML = `<option value="">-- no clubs yet --</option>`;
+    return;
+  }
+
+  // 3) Populate the typeahead datalist
   datalist.innerHTML = others.map(c => `<option value="${c.name}"></option>`).join("");
 
-  document.getElementById("btn-assign-to-club")?.addEventListener("click", async () => {
-    const clubName = (passClubInput.value || "").trim();
-    const club = others.find(c => c.name.toLowerCase() === clubName.toLowerCase());
-    if (!club) { passPanelMsg.textContent = "Pick a valid club from the list."; return; }
+  // 4) Populate the real <select>
+  passClubSelect.innerHTML = `<option value="">-- choose club --</option>` +
+    others.map(c => `<option value="${c.slug}">${c.name}</option>`).join("");
+
+  // Prefill
+  passPanel.style.display = "";
+  passPanelMsg.textContent = "";
+  passBidAmount.value = String(p.base || 0);
+  passClubInput.value = "";
+  passClubSelect.value = "";
+
+  // 5) Assign handler: prefer <select>, else use typeahead (case-insensitive)
+  const assignBtn = document.getElementById("btn-assign-to-club");
+  assignBtn?.addEventListener("click", async () => {
+    passPanelMsg.textContent = "";
+
+    // pick club either from <select> or typeahead
+    let club = null;
+
+    if (passClubSelect.value) {
+      club = others.find(c => c.slug === passClubSelect.value);
+    } else if (passClubInput.value.trim()) {
+      const name = passClubInput.value.trim().toLowerCase();
+      club = others.find(c => (c.name || "").toLowerCase() === name);
+      // loose match: startsWith if exact not found
+      if (!club) {
+        club = others.find(c => (c.name || "").toLowerCase().startsWith(name));
+      }
+    }
+
+    if (!club) {
+      passPanelMsg.textContent = "Pick a valid club using dropdown or start typing the club name.";
+      return;
+    }
 
     const winningBid = Math.max(0, Number(passBidAmount.value) || 0);
 
     // Local update
-    state.players = state.players.map(x => x.id === p.id ? ({ ...x, status: "won", owner: club.slug, finalBid: winningBid }) : x);
+    state.players = state.players.map(x =>
+      x.id === p.id ? ({ ...x, status: "won", owner: club.slug, finalBid: winningBid }) : x
+    );
     state.log.push({ type: "lost", id: p.id, owner: club.slug, bid: winningBid });
     state.activeId = null;
     persist();
 
     // DB budget adjust (best-effort)
     try {
-      if (club.id) await adjustBudgetDB({ club_id: club.id, delta: -winningBid });
-      state.clubs = await fetchClubs();
-    } catch(e) {
-      console.warn("adjustBudgetDB (other club) failed:", e);
+      if (club.id && typeof adjustBudgetDB === "function") {
+        await adjustBudgetDB({ club_id: club.id, delta: -winningBid });
+      }
+      if (typeof fetchClubs === "function") {
+        state.clubs = await fetchClubs(); // refresh budget_left
+        persist();
+      }
+    } catch (e) {
+      console.warn("adjustBudgetDB/fetchClubs failed:", e);
     }
 
     render();
-  });
-} else {
-  if (passPanel) passPanel.style.display = "none";
+  }, { once: true });
 }
+
 
   const bidInput = document.getElementById("yourBid");
   const warn = document.getElementById("guardWarn");
