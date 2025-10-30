@@ -189,6 +189,25 @@ async function addClubAndRefresh({ name, logo_url, starting_budget }) {
     await addClubLocal({ name, logo_url, starting_budget: start });
   }
 }
+// --- Google Sheets URL normalizer (accepts /edit, /view, share links) ---
+function normalizeGsheetsCsvUrl(url) {
+  // already a published CSV
+  if (/[\?&]output=csv\b/i.test(url)) return url;
+
+  // /gviz/tq works for most sheets even if not "published to web"
+  // e.g. https://docs.google.com/spreadsheets/d/<ID>/edit#gid=<GID>
+  const m = url.match(/https:\/\/docs\.google\.com\/spreadsheets\/d\/([^/]+)/i);
+  if (!m) return url; // not a sheets URL
+  const id = m[1];
+
+  // Try to extract gid
+  const gidMatch = url.match(/[?#&]gid=(\d+)/i);
+  const gid = gidMatch ? gidMatch[1] : null;
+
+  // Build a gviz CSV URL
+  const base = `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv`;
+  return gid ? `${base}&gid=${gid}` : base;
+}
 
 /* ===========================
    Players helpers
@@ -576,24 +595,29 @@ function wireCsvImportUI() {
   const setMsg = (t) => { if (msgEl) msgEl.textContent = t; };
 
   // Fetch CSV from Google Sheets (published-to-web CSV)
-  if (btnFetch && urlEl) {
-    btnFetch.onclick = null;
-    btnFetch.addEventListener("click", async () => {
-      try {
-        setMsg("");
-        const url = (urlEl.value || "").trim();
-        if (!url) { setMsg("Enter a Google Sheet CSV URL"); return; }
-        const resp = await fetch(url, { cache: "no-store" });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const text = await resp.text();
-        if (pasteEl) pasteEl.value = text;
-        setMsg("Fetched CSV — click Import to load players.");
-      } catch (e) {
-        console.error("Fetch CSV failed:", e);
-        setMsg("Fetch failed. Ensure the sheet is 'Published to the web' and URL ends with output=csv.");
-      }
-    });
-  }
+  // Fetch CSV from Google Sheets (published-to-web OR normal share link)
+// Fetch CSV from Google Sheets (published-to-web OR normal share link)
+if (btnFetch && urlEl) {
+  btnFetch.onclick = null;
+  btnFetch.addEventListener("click", async () => {
+    try {
+      setMsg("");
+      const rawUrl = (urlEl.value || "").trim();
+      if (!rawUrl) { setMsg("Enter a Google Sheet URL"); return; }
+      const url = normalizeGsheetsCsvUrl(rawUrl);
+      const resp = await fetch(url, { cache: "no-store" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const text = await resp.text();
+      if (pasteEl) pasteEl.value = text;
+      setMsg("Fetched CSV — click Import to load players.");
+    } catch (e) {
+      console.error("Fetch CSV failed:", e);
+      setMsg("Fetch failed. If the sheet is private, either publish to web (CSV) or paste the CSV.");
+    }
+  });
+}
+
+
 
   // Import from textarea using robust parser
   if (btnImport && pasteEl) {
@@ -634,6 +658,88 @@ function wireCsvImportUI() {
     btnClearPaste.addEventListener("click", () => { pasteEl.value = ""; setMsg(""); });
   }
 }
+function wireStartBidUI() {
+  const input   = document.getElementById("startName");
+  const results = document.getElementById("startResults");
+  const seedEl  = document.getElementById("seedBase");
+  const btnSet  = document.getElementById("btn-start-bid");
+  if (!input || !results || !btnSet) return;
+
+  let highlight = -1;   // highlighted index in the menu
+  let currentList = []; // current filtered players
+
+  function closeMenu(){ results.style.display = "none"; results.innerHTML = ""; highlight = -1; currentList = []; }
+  function showMenu(html){ results.innerHTML = html; results.style.display = "block"; }
+
+  function filterPlayers(q) {
+    const s = q.trim().toLowerCase();
+    if (s.length < 2) return [];
+    const arr = (state.players || []).filter(p => !!p.name);
+    // simple score: startsWith > substring
+    const scored = arr.map(p => {
+      const n = p.name.toLowerCase();
+      let score = -1;
+      if (n.startsWith(s)) score = 2;
+      else if (n.includes(s)) score = 1;
+      return { p, score };
+    }).filter(x => x.score >= 0);
+    scored.sort((a,b) => b.score - a.score || a.p.name.localeCompare(b.p.name));
+    return scored.slice(0, 10).map(x => x.p);
+  }
+
+  function renderMenu(list){
+    if (!list.length) { closeMenu(); return; }
+    const html = list.map((p, i) => `
+      <div class="ta-item" data-i="${i}" style="padding:6px 8px;cursor:pointer">
+        <div><b>${p.name}</b></div>
+        <div class="meta">Cat ${p.category || "-"} · Base ${p.base ?? "-" } · ${p.role || ""}</div>
+      </div>
+    `).join("");
+    showMenu(html);
+    Array.from(results.querySelectorAll(".ta-item")).forEach(el=>{
+      el.addEventListener("mouseenter", ()=>{ highlight = Number(el.dataset.i); });
+      el.addEventListener("mouseleave", ()=>{ highlight = -1; });
+      el.addEventListener("click", ()=> choose(Number(el.dataset.i)));
+    });
+  }
+
+  function choose(idx){
+    const p = currentList[idx];
+    if (!p) return;
+    input.value = p.name;                         // fill full name
+    if (seedEl) seedEl.value = p.base ?? "";
+    setActivePlayer(p.id);
+    closeMenu();
+  }
+
+  input.addEventListener("input", () => {
+    const q = input.value || "";
+    currentList = filterPlayers(q);
+    renderMenu(currentList);
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (results.style.display !== "block") return;
+    if (e.key === "ArrowDown") { e.preventDefault(); highlight = Math.min(currentList.length-1, highlight+1); }
+    if (e.key === "ArrowUp")   { e.preventDefault(); highlight = Math.max(0, highlight-1); }
+    if (e.key === "Enter")     { e.preventDefault(); choose(highlight >= 0 ? highlight : 0); }
+  });
+
+  document.addEventListener("click", (e)=>{
+    if (!results.contains(e.target) && e.target !== input) closeMenu();
+  });
+
+  btnSet.onclick = () => {
+    const q = (input.value || "").trim().toLowerCase();
+    if (!q) return;
+    const list = filterPlayers(q);
+    if (list.length) {
+      if (seedEl) seedEl.value = list[0].base ?? "";
+      setActivePlayer(list[0].id);
+      closeMenu();
+    }
+  };
+}
 
 /* ===========================
    Boot
@@ -643,9 +749,10 @@ async function boot() {
   await ensureMyClubSeeded();
   wireCreateClubUI();
   wireCsvImportUI();
-  // (Do NOT call "wireStartBidUI?.()"; that syntax throws if not defined)
+  wireStartBidUI();           // <-- add this
   render();
 }
+
 
 // Expose for index.html safe-loader
 window.boot = window.boot || boot;
