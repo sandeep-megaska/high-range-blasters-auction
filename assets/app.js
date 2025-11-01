@@ -90,8 +90,9 @@ function normalizeHeader(s) {
 }
 function show(el, on = true) {
   if (!el) return;
-  el.style.display = on ? "" : "none";
+  el.style.display = on ? "block" : "none";
 }
+
 function isHidden(el){ return !el || el.offsetParent === null; }
 
 /* ===========================
