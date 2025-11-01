@@ -1173,3 +1173,20 @@ async function boot() {
   window.__diag && __diag("boot() done");
 }
 document.addEventListener("DOMContentLoaded", boot);
+// Failsafe: ensure *some* screen is visible
+(function ensureVisible() {
+  const login = document.getElementById('loginView');
+  const settings = document.getElementById('settingsView');
+  const app = document.getElementById('appMain');
+
+  // If all are hidden, pick based on auth and show one.
+  const allHidden = [login, settings, app].every(el => !el || getComputedStyle(el).display === 'none');
+  if (allHidden) {
+    const st = JSON.parse(localStorage.getItem('hrb-auction-state')||'{}');
+    const loggedIn = !!(st.auth && st.auth.loggedIn);
+    if (login) login.style.display = loggedIn ? 'none' : '';
+    if (settings) settings.style.display = loggedIn ? 'none' : '';
+    if (app) app.style.display = loggedIn ? '' : 'none';
+    console.warn('[hrb] All views were hidden; applied failsafe.');
+  }
+})();
