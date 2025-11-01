@@ -2,328 +2,233 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>High Range Blasters — Auction Assist</title>
-
-  <link rel="stylesheet" href="/assets/styles.css" />
-
- 
-
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  />
+  <title>HRB Auction Assist</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
+    rel="stylesheet"
+  />
+  <link rel="stylesheet" href="./assets/styles.css" />
   <style>
-    /* Make anchor jumps land below the header */
-    #playersList, #liveBid, #addClubCard { scroll-margin-top: 80px; }
+    :root { --bg:#f7fafc; --card:#fff; --muted:#6b7280; --line:#e5e7eb; }
+    body { margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:#0f172a; }
+    .wrap { max-width:1200px; margin:0 auto; padding:18px; }
+    h2,h3 { margin:0 0 10px; }
+    .hint { color:var(--muted); font-size:12px; }
+    .btn { padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:#111827; color:#fff; cursor:pointer; }
+    .btn[disabled] { opacity:.5; cursor:not-allowed; }
+    .btn-ghost { background:#fff; color:#111827; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; }
+    input, textarea { width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid var(--line); border-radius:8px; }
+    label { font-size:12px; color:#111827; display:block; margin:6px 0; }
+    .row { display:flex; gap:8px; align-items:center; }
+    .topbar { display:flex; gap:18px; align-items:center; background:var(--card); border:1px solid var(--line); padding:10px 12px; border-radius:12px; }
+    .topbar .stat { font-size:14px; }
+    .topbar .right { margin-left:auto; display:flex; gap:8px; }
+    .main-grid { display:grid; grid-template-columns: 1.1fr 1fr 1fr; gap:14px; margin-top:14px; }
+    .players, .live, .squad { min-height:420px; }
+    .players .list { max-height:520px; overflow:auto; }
+    .typeahead { margin:8px 0 10px; position:relative; }
+    .typeahead input { padding-right:10px; }
+    #startResults { position:absolute; left:0; right:0; top:100%; z-index:5; background:#fff; border:1px solid var(--line); border-radius:8px; display:none; max-height:220px; overflow:auto; }
+    #startResults .ta-item { padding:8px 10px; border-bottom:1px solid var(--line); cursor:pointer; }
+    #startResults .ta-item:hover { background:#f3f4f6; }
+    .clubs-grid { display:grid; grid-template-columns: repeat( auto-fit, minmax(260px, 1fr) ); gap:12px; }
+    .footer-space { height:40px; }
+    .divider { height:1px; background:var(--line); margin:10px 0; }
+    /* Hide sections by default; JS will unhide */
+    #settingsView, #appMain { display:none; }
+    /* Minimal mini-row already formatted by JS inline styles */
   </style>
 </head>
-
 <body>
-  <!-- Top shortcuts -->
-  <nav class="row" style="gap:12px;margin-bottom:12px;">
-    <a href="#playersList">Players</a>
-    <a href="#liveBid">Live Bid</a>
-    <a href="#addClubCard">Manage Clubs</a>
-  </nav>
-
-  <div id="app" class="page">
-    <header class="topbar">
-      <div class="brand">
-        <img src="/assets/highrange.svg" alt="High Range Blasters" class="brand-logo" />
-        <h1>High Range Blasters — Auction Assist</h1>
-      </div>
-      <div class="top-actions">
-        <button id="btn-export" class="btn">Export Won (CSV)</button>
-        <button id="btn-reset" class="btn btn-ghost">Reset Session</button>
-        <button id="btn-logout" class="btn btn-ghost" style="display:none">Logout</button>
-      </div>
-    </header>
+  <div class="wrap">
 
     <!-- LOGIN -->
-    <section id="loginView" class="card modal" style="display:none">
-      <h2>Login</h2>
-      <p class="hint">Enter your credentials to start the auction.</p>
-      <div class="form-grid">
-        <label> Username
+    <section id="loginView" class="card" style="max-width:440px; margin:40px auto; padding:18px;">
+      <div class="row" style="gap:10px; margin-bottom:8px;">
+        <img src="./assets/highrange.svg" alt="HRB" style="width:36px;height:36px;">
+        <h2>HRB Auction Assist — Login</h2>
+      </div>
+      <div class="row" style="gap:12px;">
+        <label style="flex:1;">Username
           <input id="loginUser" placeholder="HRB" />
         </label>
-        <label> Password
+        <label style="flex:1;">Password
           <input id="loginPass" type="password" placeholder="sandeep" />
         </label>
       </div>
       <div class="row" style="margin-top:10px;">
         <button id="btn-login" class="btn">Login</button>
-        <div id="loginError" class="hint" style="color:#dc2626;margin-left:8px;"></div>
+        <div id="loginError" class="hint" style="margin-left:8px;"></div>
       </div>
     </section>
 
-    <!-- SETTINGS -->
-    <section id="settingsView" class="card modal" style="display:none">
+    <!-- SETTINGS (pre-auction) -->
+    <section id="settingsView" class="card" style="padding:16px;">
       <h2>Pre-Bid Settings</h2>
-      <p class="hint">Configure roster size, budget and category base values. For multiple preselected players use:
-        <b>Name1=1200; Name2=900</b></p>
-      <div class="form-grid">
-        <label> Number of Players (max)
-          <input type="number" id="cfgPlayersCap" placeholder="15" />
-        </label>
-        <label> Overall Points
-          <input type="number" id="cfgTotalPoints" placeholder="15000" />
-        </label>
+      <div class="divider"></div>
 
-        <label> Category 1 base (Rank 1–16)
-          <input type="number" id="cfgBaseC1" placeholder="1500" />
+      <div class="row" style="gap:14px; flex-wrap:wrap;">
+        <label style="flex:1; min-width:180px;">Players cap
+          <input id="cfgPlayersCap" type="number" value="15" />
         </label>
-        <label> Category 2 base (Rank 17–24)
-          <input type="number" id="cfgBaseC2" placeholder="1200" />
+        <label style="flex:1; min-width:220px;">Total points (HRB)
+          <input id="cfgTotalPoints" type="number" value="15000" />
         </label>
-        <label> Category 3 base (Rank 25–32)
-          <input type="number" id="cfgBaseC3" placeholder="900" />
-        </label>
-        <label> Category 4 base (Rank 33–40)
-          <input type="number" id="cfgBaseC4" placeholder="700" />
-        </label>
-        <label> Category 5 base (Rank >40)
-          <input type="number" id="cfgBaseC5" placeholder="500" />
-        </label>
-
-        <label> Guardrail min/base per remaining slot
-          <input type="number" id="cfgGuardMin" placeholder="(defaults to Cat 5)" />
-        </label>
-
-        <label> Preselected Player(s)
-          <input id="cfgPreName" placeholder="Name=1200; Name2=900 (or single name)" />
-        </label>
-        <label> Single Preselected Bid (if only one name)
-          <input type="number" id="cfgPreBid" placeholder="e.g. 1200" />
+        <label style="flex:1; min-width:200px;">Guardrail min base per slot
+          <input id="cfgGuardMin" type="number" value="250" />
         </label>
       </div>
 
-      <div class="stats" style="margin-top:10px;">
-        <div class="stat">
-          <span>Available Score (after preselected deduction)</span>
-          <b id="cfgAvailableScore">—</b>
+      <h3 style="margin-top:14px;">Category base values (fallback if CSV lacks base)</h3>
+      <div class="row" style="gap:10px; flex-wrap:wrap;">
+        <label style="width:120px;">Cat 1 <input id="cfgBaseC1" type="number" placeholder="e.g. 1200" /></label>
+        <label style="width:120px;">Cat 2 <input id="cfgBaseC2" type="number" /></label>
+        <label style="width:120px;">Cat 3 <input id="cfgBaseC3" type="number" /></label>
+        <label style="width:120px;">Cat 4 <input id="cfgBaseC4" type="number" /></label>
+        <label style="width:120px;">Cat 5 <input id="cfgBaseC5" type="number" /></label>
+      </div>
+
+      <h3 style="margin-top:14px;">HRB Pre-selected player(s)</h3>
+      <div class="row" style="gap:10px; flex-wrap:wrap;">
+        <label style="flex:2; min-width:240px;">Names and prices (e.g. <i>Name1=1200; Name2=900</i>)
+          <input id="cfgPreName" placeholder="John WK=1200; Anil LHB=900" />
+        </label>
+        <label style="flex:1; min-width:160px;">Single bid (used only if above has one name without “=price”)
+          <input id="cfgPreBid" type="number" placeholder="900" />
+        </label>
+        <div class="row" style="align-items:flex-end;">
+          <div class="hint">Available after preselected: <b id="cfgAvailableScore">15000</b></div>
         </div>
       </div>
 
-      <div class="row" style="margin-top:10px;">
-        <button id="btn-save-settings" class="btn">Save & Start</button>
-        <div id="settingsError" class="hint" style="color:#dc2626;margin-left:8px;"></div>
+      <h3 style="margin-top:14px;">Import players (CSV)</h3>
+      <div class="row" style="gap:10px; flex-wrap:wrap;">
+        <label style="flex:2; min-width:260px;">CSV URL (published to web; output=csv)
+          <input id="csvUrl" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv" />
+        </label>
+        <div class="row" style="gap:8px; align-items:flex-end;">
+          <button id="btn-fetch" class="btn">Fetch</button>
+          <button id="btn-clear-url" class="btn btn-ghost">Clear</button>
+        </div>
       </div>
-    </section>
+      <label style="margin-top:8px;">Or paste CSV here
+        <textarea id="csvPaste" rows="6" placeholder="name,alumni,phone,role,batting hand,wk,category,base..."></textarea>
+      </label>
+      <div class="row" style="margin-top:8px;">
+        <button id="btn-import" class="btn">Import Players</button>
+        <button id="btn-clear-paste" class="btn btn-ghost">Clear Paste</button>
+        <div id="importMsg" class="hint" style="margin-left:8px;"></div>
+      </div>
 
-    <!-- APP -->
-    <main id="appMain" class="grid" style="display:none">
-      <!-- LEFT -->
-      <section class="card">
-        <h2>Auction Controls</h2>
-        <div class="form-grid">
-          <label> Total Points
-            <input type="number" id="totalPoints" />
-          </label>
-          <label> Players Needed
-            <input type="number" id="playersNeeded" />
-          </label>
-          <label> Guardrail Min / Remaining Slot
-            <input type="number" id="minBasePerPlayer" />
-          </label>
-          <div class="row">
-            <button id="btn-shuffle" class="btn">Shuffle Queue</button>
-            <button id="btn-next" class="btn">Next Player</button>
-            <button id="btn-undo" class="btn btn-ghost">Undo</button>
-          </div>
-        </div>
-
-        <div class="stats">
-          <div class="stat"><span>Remaining Points</span><b id="remainingPoints">0</b></div>
-          <div class="stat"><span>Remaining Slots</span><b id="remainingSlots">0</b></div>
-          <div class="guard" id="guardrail">Guardrail: <b>OK</b></div>
-        </div>
-
-        <h3>Import / Export</h3>
-        <div class="import">
-          <label> Google Sheet CSV URL
-            <input id="csvUrl" placeholder="https://docs.google.com/.../pub?output=csv" />
-          </label>
-          <div class="row">
-            <button id="btn-fetch" class="btn">Fetch CSV</button>
-            <button id="btn-clear-url" class="btn btn-ghost">Clear</button>
-          </div>
-
-          <label> Paste CSV
-            <textarea id="csvPaste" rows="6"
-              placeholder="name,rank,dob,alumni,age,rating10,role,base(optional),batting_hand,is_wk"></textarea>
-          </label>
-          <div class="row">
-            <button id="btn-import" class="btn">Import</button>
-            <button id="btn-clear-paste" class="btn btn-ghost">Clear</button>
-          </div>
-          <div id="importMsg" class="hint" style="margin-top:6px;"></div>
-        </div>
-      </section>
-
-      <!-- MIDDLE -->
-      <section class="card">
-        <h2>Live Bid</h2>
-
-        <!-- Start-a-bid typeahead -->
-        <div class="typeahead">
-          <label> Start Bid: type 3–4 letters, pick exact player
-            <input id="startName" placeholder="e.g. Rah, Ana, Var" autocomplete="off" />
-          </label>
-          <div id="startResults" class="ta-menu" style="display:none"></div>
-          <div class="row" style="margin-top:8px;">
-            <label style="flex:1">Seed/Base Value (from category or sheet)
-              <input type="number" id="seedBase" />
-            </label>
-            <button id="btn-start-bid" class="btn" style="align-self:flex-end">Set Active</button>
-          </div>
-        </div>
-
-        <div id="liveBid" style="margin-top:10px"></div>
-
-        <h2 style="margin-top:14px">Selected Squad</h2>
-        <div id="selectedList"></div>
-      </section>
-
-      <!-- RIGHT -->
-      <section class="card">
-        <h2>Players <small id="playersCount"></small></h2>
-        <div id="complianceBar"></div>
-        <div class="list" id="playersList"></div>
-      </section>
-    </main>
-
-    <!-- ADD CLUB (Minimal) -->
-    <section class="card" id="addClubCard">
-      <h2>Add Club</h2>
-      <div class="form-grid">
-        <label>Club name
-          <input id="clubName" placeholder="Coastal Strikers" />
+      <h3 style="margin-top:18px;">Add other clubs (do this before the auction)</h3>
+      <div class="row" style="gap:10px; flex-wrap:wrap;">
+        <label style="flex:1; min-width:200px;">Club name
+          <input id="clubName" placeholder="E.g. Thunder Hawks" />
         </label>
-        <label>Logo URL (optional)
-          <input id="clubLogo" placeholder="./assets/logo.svg or https://…" />
+        <label style="flex:1; min-width:220px;">Logo URL
+          <input id="clubLogo" placeholder="https://..." />
         </label>
-        <label>Starting Budget (points)
+        <label style="flex:1; min-width:160px;">Starting budget
           <input id="clubBudget" type="number" placeholder="15000" />
         </label>
+        <button id="btnCreateClub" class="btn" style="align-self:flex-end;">Add Club</button>
       </div>
-      <div class="row" style="margin-top:10px;">
-        <button id="btnCreateClub" class="btn">Create Club</button>
-        <div id="clubCreateMsg" class="hint" style="margin-left:8px;"></div>
-      </div>
-    </section>
+      <div id="clubCreateMsg" class="hint" style="margin-top:4px;"></div>
 
-    <!-- Pass / Assign to other club UI -->
-    <div id="passPanel" class="card" style="margin-top:10px; display:none">
-      <h3>Assign to Other Club</h3>
-      <div class="form-grid">
-        <label> Club
-          <input list="clubNames" id="passClubInput" placeholder="Start typing club name…" />
-          <datalist id="clubNames"></datalist>
-        </label>
-        <label> Winning Price
-          <input type="number" id="passBidAmount" placeholder="e.g. 900" />
-        </label>
-      </div>
+      <div class="divider"></div>
       <div class="row" style="margin-top:8px;">
-        <button id="btn-assign-to-club" class="btn">Assign</button>
-        <div class="hint" id="passPanelMsg" style="margin-left:8px;"></div>
+        <button id="btn-save-settings" class="btn">Save & Go to Auction</button>
+        <div id="settingsError" class="hint" style="margin-left:8px;"></div>
       </div>
-    </div>
-
-    <!-- OTHER CLUBS LIVE SQUADS -->
-    <section class="card">
-      <h2>Other Clubs — Live Squads</h2>
-      <p class="hint">Updates as you mark players “won” by other clubs.</p>
-      <div id="otherClubsPanel" class="grid"></div>
     </section>
 
-    <footer class="footer">
-      <span>Session is saved locally. Optional cloud sync via Supabase.</span>
-    </footer>
+    <!-- APP (auction) -->
+    <section id="appMain">
+      <!-- Top bar with stats + quick actions -->
+      <div class="topbar">
+        <div class="stat">Remaining Points: <b id="remainingPoints">0</b></div>
+        <div class="stat">Remaining Slots: <b id="remainingSlots">0</b></div>
+        <div class="stat" id="guardrail">Guardrail (min per slot): <b>250</b></div>
+        <div class="right">
+          <button id="btn-export" class="btn btn-ghost">Export Won (CSV)</button>
+          <button id="btn-logout" class="btn btn-ghost">Logout</button>
+        </div>
+      </div>
+
+      <!-- Compliance -->
+      <div id="complianceBar" class="row" style="margin:10px 0 0;"></div>
+
+      <!-- Main 3-column layout -->
+      <div class="main-grid">
+        <!-- LEFT: Players & search -->
+        <div class="players card" style="padding:12px;">
+          <h3>Players <span id="playersCount" class="hint">(0)</span></h3>
+          <div class="typeahead">
+            <label>Find player by name (as announced on TV)</label>
+            <input id="startName" placeholder="Start typing a name…" autocomplete="off" />
+            <div id="startResults"></div>
+          </div>
+          <div class="row" style="gap:8px;">
+            <label style="flex:1;">Seed / Base Value (from CSV or category)
+              <input id="seedBase" disabled placeholder="auto" />
+            </label>
+            <button id="btn-start-bid" class="btn" style="align-self:flex-end;">Set Active</button>
+          </div>
+          <div class="divider"></div>
+          <div id="playersList" class="list"></div>
+        </div>
+
+        <!-- MIDDLE: Live Bid -->
+        <div class="live card" style="padding:12px;">
+          <h3>Live Bid</h3>
+          <div id="liveBid" style="margin-top:8px;"></div>
+
+          <!-- Pass / assign to other club -->
+          <div id="passPanel" class="card" style="margin-top:12px; padding:12px; display:none;">
+            <div class="row" style="justify-content:space-between;">
+              <div><b>Assign to another club</b></div>
+            </div>
+            <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:8px;">
+              <label style="flex:2; min-width:220px;">Club
+                <input id="passClubInput" list="clubNames" placeholder="Type or pick a club…" />
+                <datalist id="clubNames"></datalist>
+              </label>
+              <label style="flex:1; min-width:140px;">Final Bid
+                <input id="passBidAmount" type="number" placeholder="900" />
+              </label>
+              <button id="btn-assign-to-club" class="btn" style="align-self:flex-end;">Assign</button>
+            </div>
+            <div id="passPanelMsg" class="hint" style="margin-top:6px;"></div>
+          </div>
+        </div>
+
+        <!-- RIGHT: HRB Squad (replaces old Auction Controls) -->
+        <div class="squad card" style="padding:12px;">
+          <h3>HRB Selected Squad</h3>
+          <div id="selectedList" style="margin-top:6px;"></div>
+        </div>
+      </div>
+
+      <!-- OTHER CLUBS -->
+      <div style="margin-top:14px;">
+        <h3>Other Clubs</h3>
+        <div id="otherClubsPanel" class="clubs-grid"></div>
+      </div>
+
+      <div class="footer-space"></div>
+    </section>
   </div>
 
-  <!-- Hash navigation that also reveals appMain if deep-linking to Live Bid -->
-  <script>
-    (function hashNav(){
-      function $(id){ return document.getElementById(id); }
-      function isHidden(el){ return !el || el.offsetParent === null; }
-      function showMainIfNeeded(targetId){
-        if (targetId === "liveBid") {
-          const appMain = $("appMain");
-          if (appMain && getComputedStyle(appMain).display === "none") {
-            $("loginView") && ( $("loginView").style.display = "none");
-            $("settingsView") && ( $("settingsView").style.display = "none");
-            appMain.style.display = "grid";
-          }
-        }
-      }
-      function scrollToId(id, tries=12){
-        const el = $(id);
-        if (el && !isHidden(el)) { el.scrollIntoView({behavior:"smooth", block:"start"}); return true; }
-        if (tries>0) setTimeout(()=>scrollToId(id, tries-1), 100);
-        return false;
-      }
-      document.addEventListener("DOMContentLoaded", () => {
-        document.querySelectorAll('a[href*="#"]').forEach(a => {
-          a.addEventListener("click", (e) => {
-            const href = a.getAttribute("href") || "";
-            const id = href.includes("#") ? href.split("#").pop() : "";
-            if (!id) return;
-            e.preventDefault();
-            history.pushState(null, "", "#" + id);
-            showMainIfNeeded(id);
-            setTimeout(()=>scrollToId(id), 0);
-            setTimeout(()=>scrollToId(id), 150);
-          });
-        });
-        window.addEventListener("hashchange", () => {
-          const id = (location.hash || "").slice(1);
-          if (!id) return;
-          showMainIfNeeded(id);
-          scrollToId(id);
-        });
-        const initial = (location.hash || "").slice(1);
-        if (initial) { showMainIfNeeded(initial); setTimeout(()=>scrollToId(initial), 0); }
-      });
-    })();
-  </script>
- <!-- Supabase UMD (global) BEFORE app scripts -->
-  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
-  <script>
-    // Expose Supabase env for assets/supabaseClient.js
-    window.ENV = {
-      SUPABASE_URL: "https://zwusmrtwnptkowgosfly.supabase.co",
-      SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3dXNtcnR3bnB0a293Z29zZmx5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAzMzQzMDQsImV4cCI6MjA3NTkxMDMwNH0.IKrr8x6xOCXicSd1GJiDpR3mzamhytMCon0cY_1KxD4"
-    };
-  </script>
- <!-- Load ONE app script (non-module) -->
-<script src="./assets/app.js"></script>
-
-<!-- (Optional) smooth hash scroll -->
-<script>
-  function scrollToId(id, tries = 12) {
-    const el = document.getElementById(id);
-    if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); return true; }
-    if (tries > 0) setTimeout(() => scrollToId(id, tries - 1), 100);
-    return false;
-  }
-  function wireHashScrolling() {
-    document.querySelectorAll('a[href*="#"]').forEach(a => {
-      a.addEventListener("click", (e) => {
-        const href = a.getAttribute("href");
-        const hash = (href && href.includes("#")) ? href.split("#").pop() : "";
-        if (!hash) return;
-        e.preventDefault();
-        history.pushState(null, "", "#" + hash);
-        scrollToId(hash);
-      });
-    });
-    window.addEventListener("hashchange", () => {
-      const id = (location.hash || "").slice(1);
-      if (id) scrollToId(id);
-    });
-    const initial = (location.hash || "").slice(1);
-    if (initial) setTimeout(() => scrollToId(initial), 0);
-  }
-  document.addEventListener("DOMContentLoaded", wireHashScrolling);
-</script>
+  <!-- Optional (only if you use Supabase env): -->
+  <script src="./assets/supabaseClient.js"></script>
+  <!-- Your app -->
+  <script src="./assets/app.js"></script>
 </body>
 </html>
