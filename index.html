@@ -2,20 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover"
-  />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>HRB Auction Assist</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
-    rel="stylesheet"
-  />
-  <link rel="stylesheet" href="./assets/styles.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
   <style>
     :root { --bg:#f7fafc; --card:#fff; --muted:#6b7280; --line:#e5e7eb; }
+    * { box-sizing: border-box; }
     body { margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:#0f172a; }
     .wrap { max-width:1200px; margin:0 auto; padding:18px; }
     h2,h3 { margin:0 0 10px; }
@@ -24,7 +18,7 @@
     .btn[disabled] { opacity:.5; cursor:not-allowed; }
     .btn-ghost { background:#fff; color:#111827; }
     .card { background:var(--card); border:1px solid var(--line); border-radius:12px; }
-    input, textarea { width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid var(--line); border-radius:8px; }
+    input, textarea { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; }
     label { font-size:12px; color:#111827; display:block; margin:6px 0; }
     .row { display:flex; gap:8px; align-items:center; }
     .topbar { display:flex; gap:18px; align-items:center; background:var(--card); border:1px solid var(--line); padding:10px 12px; border-radius:12px; }
@@ -34,14 +28,11 @@
     .players, .live, .squad { min-height:420px; }
     .players .list { max-height:520px; overflow:auto; }
     .typeahead { margin:8px 0 10px; position:relative; }
-    .typeahead input { padding-right:10px; }
     #startResults { position:absolute; left:0; right:0; top:100%; z-index:5; background:#fff; border:1px solid var(--line); border-radius:8px; display:none; max-height:220px; overflow:auto; }
     #startResults .ta-item { padding:8px 10px; border-bottom:1px solid var(--line); cursor:pointer; }
     #startResults .ta-item:hover { background:#f3f4f6; }
     .clubs-grid { display:grid; grid-template-columns: repeat( auto-fit, minmax(260px, 1fr) ); gap:12px; }
-    .footer-space { height:40px; }
     .divider { height:1px; background:var(--line); margin:10px 0; }
-    /* Hide sections by default; JS will unhide */
     #settingsView, #appMain { display:none; }
   </style>
 </head>
@@ -51,7 +42,6 @@
     <!-- LOGIN -->
     <section id="loginView" class="card" style="max-width:440px; margin:40px auto; padding:18px;">
       <div class="row" style="gap:10px; margin-bottom:8px;">
-        <img src="./assets/highrange.svg" alt="HRB" style="width:36px;height:36px;">
         <h2>HRB Auction Assist — Login</h2>
       </div>
       <div class="row" style="gap:12px;">
@@ -109,7 +99,7 @@
         </div>
       </div>
       <label style="margin-top:8px;">Or paste CSV here
-        <textarea id="csvPaste" rows="6" placeholder="name,alumni,dob,skill,batting,bowling,availability,phone,rating..."></textarea>
+        <textarea id="csvPaste" rows="6" placeholder="Use HRB_Auction_Master_Template.csv headers"></textarea>
       </label>
       <div class="row" style="margin-top:8px;">
         <button id="btn-import" class="btn">Import Players</button>
@@ -118,9 +108,7 @@
       </div>
 
       <h3 style="margin-top:18px;">Per-club preselected players</h3>
-      <div id="clubPreselectedPanel" class="card" style="padding:12px;">
-        <!-- app.js renders 8 rows (HRB + 7 clubs): Club | Preselected (Name=Price; …) -->
-      </div>
+      <div id="clubPreselectedPanel" class="card" style="padding:12px;"></div>
 
       <div class="divider"></div>
       <div class="row" style="margin-top:8px;">
@@ -131,7 +119,6 @@
 
     <!-- APP (auction) -->
     <section id="appMain">
-      <!-- Top bar with stats + quick actions -->
       <div class="topbar">
         <div class="stat">Remaining Points: <b id="remainingPoints">0</b></div>
         <div class="stat">Remaining Slots: <b id="remainingSlots">0</b></div>
@@ -142,10 +129,8 @@
         </div>
       </div>
 
-      <!-- Compliance -->
       <div id="complianceBar" class="row" style="margin:10px 0 0;"></div>
 
-      <!-- Main 3-column layout -->
       <div class="main-grid">
         <!-- LEFT: Players & search -->
         <div class="players card" style="padding:12px;">
@@ -156,7 +141,7 @@
             <div id="startResults"></div>
           </div>
           <div class="row" style="gap:8px;">
-            <label style="flex:1;">Seed / Base Value (from CSV or role/category)
+            <label style="flex:1;">Seed / Base Value
               <input id="seedBase" disabled placeholder="auto" />
             </label>
             <button id="btn-start-bid" class="btn" style="align-self:flex-end;">Set Active</button>
@@ -169,8 +154,6 @@
         <div class="live card" style="padding:12px;">
           <h3>Live Bid</h3>
           <div id="liveBid" style="margin-top:8px;"></div>
-
-          <!-- Pass / assign to other club -->
           <div id="passPanel" class="card" style="margin-top:12px; padding:12px; display:none;">
             <div class="row" style="justify-content:space-between;">
               <div><b>Assign to another club</b></div>
@@ -189,28 +172,21 @@
           </div>
         </div>
 
-        <!-- RIGHT: HRB Squad (replaces old Auction Controls) -->
+        <!-- RIGHT: HRB Squad -->
         <div class="squad card" style="padding:12px;">
           <h3>HRB Selected Squad</h3>
           <div id="selectedList" style="margin-top:6px;"></div>
         </div>
       </div>
 
-      <!-- OTHER CLUBS -->
       <div style="margin-top:14px;">
         <h3>Other Clubs</h3>
         <div id="otherClubsPanel" class="clubs-grid"></div>
       </div>
-
-      <div class="footer-space"></div>
     </section>
   </div>
 
-  <!-- Versioned filename to break cache -->
- <!-- Keep ONE script tag only -->
-<!-- at the very bottom of index.html -->
-<script defer src="./assets/app.js?v=20"></script>
-
-
+  <!-- Single script include; keep the filename exactly as assets/app.js -->
+  <script defer src="./assets/app.js?v=1"></script>
 </body>
 </html>
