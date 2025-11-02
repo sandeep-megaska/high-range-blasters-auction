@@ -127,19 +127,12 @@
         <div id="importMsg" class="hint" style="margin-left:8px;"></div>
       </div>
 
-      <h3 style="margin-top:18px;">Add other clubs (do this before the auction)</h3>
-      <div class="row" style="gap:10px; flex-wrap:wrap;">
-        <label style="flex:1; min-width:200px;">Club name
-          <input id="clubName" placeholder="E.g. Thunder Hawks" />
-        </label>
-        <label style="flex:1; min-width:220px;">Logo URL
-          <input id="clubLogo" placeholder="https://..." />
-        </label>
-        <label style="flex:1; min-width:160px;">Starting budget
-          <input id="clubBudget" type="number" placeholder="15000" />
-        </label>
-        <button id="btnCreateClub" class="btn" style="align-self:flex-end;">Add Club</button>
-      </div>
+      <h3 style="margin-top:18px;">Per-club preselected players</h3>
+<div id="clubPreselectedPanel" class="card" style="padding:12px;">
+  <!-- app.js will render 8 rows (HRB + 7 clubs), each like:
+       Club Name | Preselected (Name=Price; Name2=Price; …) -->
+</div>
+
       <div id="clubCreateMsg" class="hint" style="margin-top:4px;"></div>
 
       <div class="divider"></div>
