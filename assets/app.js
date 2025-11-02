@@ -1177,15 +1177,17 @@ function wireTopControls() {
     });
 
   if (btnLogout) {
-    show(btnLogout, true);
-    btnLogout.addEventListener("click", () => {
-      state.auth = { loggedIn: false, user: null };
-      persist();
-      show($("appMain"), false);
-      show($("settingsView"), false);
-      show($("loginView"), true);
-      $("loginUser")?.focus();
-    });
+  show(btnLogout, true);
+  btnLogout.addEventListener("click", async () => {
+    // FULL factory reset on logout
+    await fullReset();
+    // show login screen
+    show($("appMain"), false);
+    show($("settingsView"), false);
+    show($("loginView"), true);
+    $("loginUser")?.focus();
+  });
+}
   }
 }
 
