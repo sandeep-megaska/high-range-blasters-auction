@@ -43,7 +43,6 @@
     .divider { height:1px; background:var(--line); margin:10px 0; }
     /* Hide sections by default; JS will unhide */
     #settingsView, #appMain { display:none; }
-    /* Minimal mini-row already formatted by JS inline styles */
   </style>
 </head>
 <body>
@@ -78,21 +77,12 @@
         <label style="flex:1; min-width:180px;">Players cap
           <input id="cfgPlayersCap" type="number" value="15" />
         </label>
-        <label style="flex:1; min-width:220px;">Total points (HRB)
+        <label style="flex:1; min-width:220px;">Total points (per club)
           <input id="cfgTotalPoints" type="number" value="15000" />
         </label>
         <label style="flex:1; min-width:200px;">Guardrail min base per slot
           <input id="cfgGuardMin" type="number" value="250" />
         </label>
-      </div>
-
-      <h3 style="margin-top:14px;">Category base values (fallback if CSV lacks base)</h3>
-      <div class="row" style="gap:10px; flex-wrap:wrap;">
-        <label style="width:120px;">Cat 1 <input id="cfgBaseC1" type="number" placeholder="e.g. 1200" /></label>
-        <label style="width:120px;">Cat 2 <input id="cfgBaseC2" type="number" /></label>
-        <label style="width:120px;">Cat 3 <input id="cfgBaseC3" type="number" /></label>
-        <label style="width:120px;">Cat 4 <input id="cfgBaseC4" type="number" /></label>
-        <label style="width:120px;">Cat 5 <input id="cfgBaseC5" type="number" /></label>
       </div>
 
       <h3 style="margin-top:14px;">HRB Pre-selected player(s)</h3>
@@ -104,7 +94,7 @@
           <input id="cfgPreBid" type="number" placeholder="900" />
         </label>
         <div class="row" style="align-items:flex-end;">
-          <div class="hint">Available after preselected: <b id="cfgAvailableScore">15000</b></div>
+          <div class="hint">Available after preselected (HRB): <b id="cfgAvailableScore">15000</b></div>
         </div>
       </div>
 
@@ -119,7 +109,7 @@
         </div>
       </div>
       <label style="margin-top:8px;">Or paste CSV here
-        <textarea id="csvPaste" rows="6" placeholder="name,alumni,phone,role,batting hand,wk,category,base..."></textarea>
+        <textarea id="csvPaste" rows="6" placeholder="name,alumni,dob,skill,batting,bowling,availability,phone,rating..."></textarea>
       </label>
       <div class="row" style="margin-top:8px;">
         <button id="btn-import" class="btn">Import Players</button>
@@ -128,12 +118,9 @@
       </div>
 
       <h3 style="margin-top:18px;">Per-club preselected players</h3>
-<div id="clubPreselectedPanel" class="card" style="padding:12px;">
-  <!-- app.js will render 8 rows (HRB + 7 clubs), each like:
-       Club Name | Preselected (Name=Price; Name2=Price; …) -->
-</div>
-
-      <div id="clubCreateMsg" class="hint" style="margin-top:4px;"></div>
+      <div id="clubPreselectedPanel" class="card" style="padding:12px;">
+        <!-- app.js renders 8 rows (HRB + 7 clubs): Club | Preselected (Name=Price; …) -->
+      </div>
 
       <div class="divider"></div>
       <div class="row" style="margin-top:8px;">
@@ -169,7 +156,7 @@
             <div id="startResults"></div>
           </div>
           <div class="row" style="gap:8px;">
-            <label style="flex:1;">Seed / Base Value (from CSV or category)
+            <label style="flex:1;">Seed / Base Value (from CSV or role/category)
               <input id="seedBase" disabled placeholder="auto" />
             </label>
             <button id="btn-start-bid" class="btn" style="align-self:flex-end;">Set Active</button>
@@ -219,15 +206,7 @@
     </section>
   </div>
 
- 
-<!-- Best: change the FILENAME -->
-<script defer src="./assets/app.hrb15.js?v=1"></script>
-
-<!-- If you don’t want to rename the file, at least bump the query -->
-<!-- <script defer src="./assets/app.js?v=15"></script> -->
-
-
+  <!-- Versioned filename to break cache -->
+  <script defer src="./assets/app.hrb16.js?v=1"></script>
 </body>
 </html>
-
-
