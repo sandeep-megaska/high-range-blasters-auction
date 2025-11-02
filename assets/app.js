@@ -290,25 +290,45 @@ function applyPreselectedAllClubs() {
 function setActivePlayer(id){ state.activePlayerId = id||null; persist(); renderLiveBid(); }
 function getActivePlayer(){ return (state.players||[]).find(p=>p.id===state.activePlayerId) || null; }
 function markWon(playerId, price) {
-  const p=(state.players||[]).find(x=>x.id===playerId); if(!p) return;
-  const bid = toNum(price, p.base||0);
-  if (!guardrailOK(bid)) { alert("Guardrail violated. Reduce bid."); return; }
-  p.status="won"; p.finalBid=bid; p.owner=state.myClubSlug;
+  const p = (state.players || []).find(x => x.id === playerId);
+  if (!p) return;
+  const bid = Number(price);
+  if (!Number.isFinite(bid) || bid <= 0) {
+    alert("Please enter a valid bid (> 0).");
+    return;
+  }
+  if (!guardrailOK(bid)) {
+    alert("Guardrail violated. Reduce bid.");
+    return;
+  }
+  p.status = "won";
+  p.finalBid = bid;
+  p.owner = state.myClubSlug;
   recomputeBudgetsFromWins(); persist(); render();
 }
 function assignToClubByNameOrSlug(playerId, clubText, price) {
-  const clubs = state.clubs||[];
-  let club = clubs.find(c=>c.slug===clubText);
+  const clubs = state.clubs || [];
+  let club = clubs.find(c => c.slug === clubText);
   if (!club) {
-    const name = String(clubText||"").trim().toLowerCase();
-    club = clubs.find(c=>(c.name||"").toLowerCase()===name) ||
-           clubs.find(c=>(c.name||"").toLowerCase().startsWith(name));
+    const t = String(clubText || "").trim().toLowerCase();
+    club = clubs.find(c => (c.name || "").toLowerCase() === t) ||
+           clubs.find(c => (c.name || "").toLowerCase().startsWith(t));
   }
   const msg = $("passPanelMsg");
-  if (!club) { if (msg) msg.textContent="Pick a valid club from the list."; return; }
-  const p=(state.players||[]).find(x=>x.id===playerId); if(!p) return;
-  const bid = Math.max(0, toNum(price, p.base||0));
-  p.status="won"; p.finalBid=bid; p.owner=club.slug;
+  if (!club) { if (msg) msg.textContent = "Pick a valid club from the list."; return; }
+
+  const p = (state.players || []).find(x => x.id === playerId);
+  if (!p) return;
+
+  const bid = Number(price);
+  if (!Number.isFinite(bid) || bid <= 0) {
+    if (msg) msg.textContent = "Enter a valid final bid (> 0).";
+    return;
+  }
+
+  p.status = "won";
+  p.finalBid = bid;
+  p.owner = club.slug;
   recomputeBudgetsFromWins(); persist(); render();
 }
 
