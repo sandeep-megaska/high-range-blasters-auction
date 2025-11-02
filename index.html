@@ -122,13 +122,33 @@
     <section id="appMain">
       <div class="topbar">
         <div class="stat">Remaining Points: <b id="remainingPoints">0</b></div>
-        <div class="stat">Remaining Slots: <b id="remainingSlots">0</b></div>
-        <div class="stat" id="guardrail">Guardrail (min per slot): <b>200</b></div>
-        <div class="right">
-          <button id="btn-export" class="btn btn-ghost">Export Won (CSV)</button>
-          <button id="btn-export-state" class="btn btn-ghost">Export All Players (CSV)</button>
-          <button id="btn-logout" class="btn btn-ghost">Logout</button>
-        </div>
+<div class="stat">Remaining Slots: <b id="remainingSlots">0</b></div>
+<div class="stat" id="guardrail">Guardrail (min per slot): <b>200</b></div>
+
+
+<!-- NEW: Round + Timer strip -->
+<div class="stat" style="margin-left:18px;">
+Round: <b id="roundNo">1</b>
+</div>
+<div class="stat">Timer: <b id="timerDisplay">00:45</b></div>
+
+
+<div class="right">
+<!-- NEW: timer controls -->
+<button id="btn-timer-start" class="btn btn-ghost">Start</button>
+<button id="btn-timer-pause" class="btn btn-ghost">Pause</button>
+<button id="btn-timer-reset" class="btn btn-ghost">Reset</button>
+<button id="btn-next-round" class="btn btn-ghost">Next Round</button>
+
+
+<!-- NEW: Undo -->
+<button id="btn-undo" class="btn btn-ghost" title="Undo last win/assign">Undo</button>
+
+
+<button id="btn-export" class="btn btn-ghost">Export Won (CSV)</button>
+<button id="btn-export-state" class="btn btn-ghost">Export All Players (CSV)</button>
+<button id="btn-logout" class="btn btn-ghost">Logout</button>
+</div>
       </div>
 
       <div id="complianceBar" class="row" style="margin:10px 0 0;"></div>
