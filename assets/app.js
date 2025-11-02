@@ -293,8 +293,8 @@ function markWon(playerId, price) {
   const p = (state.players || []).find(x => x.id === playerId);
   if (!p) return;
   const bid = Number(price);
-  if (!Number.isFinite(bid) || bid <= 0) {
-    alert("Please enter a valid bid (> 0).");
+  if (!Number.isFinite(bid) || bid <= 199) {
+    alert("Please enter a valid bid (> 200).");
     return;
   }
   if (!guardrailOK(bid)) {
