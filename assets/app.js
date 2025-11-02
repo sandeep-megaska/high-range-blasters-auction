@@ -1,9 +1,6 @@
 /* assets/app.js — HRB Auction Assist (login + settings + guardrails + compliance)
    Works with <script defer src="./assets/app.js?v=..."></script>
 */
-const APP_BUILD = "hrb-2025-11-02-15"; // <— change each time you deploy
-console.log("[HRB] build:", APP_BUILD);
-window.__diag && window.__diag("build=" + APP_BUILD);
 
 /* ===========================
    Double-load guard
