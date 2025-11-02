@@ -118,7 +118,7 @@ function computePerformanceIndex(p){
 function computeBidPriority(p){
   const pi = computePerformanceIndex(p);
   const fullAvail = availabilityIsBothDays(p.availability);
-  const wkBoost = /wk/i.test(String(p.skill||"")) ? 6 : 0;
+  const wkBoost = isWK(p) ? 6 : 0;
   const leftBoost = /left/i.test(String(p.batting_type||p.batting||"")) ? 4 : 0;
   const roleAdj = /all/i.test(String(p.skill||"")) ? 1.05 : 1.0;
   const base = pi + wkBoost + leftBoost + (fullAvail?8:-10);
@@ -154,7 +154,7 @@ function marketPulse(){
   const rem=(state.players||[]).filter(p=>p.status!=="won");
   const count = (list, pred)=>list.filter(pred).length;
   const bowlers = count(rem, p=>/bowl/i.test(String(p.skill||""))||/all/i.test(String(p.skill||"")));
-  const wks = count(rem, p=>/wk/i.test(String(p.skill||"")));
+  const wks = count(rem, p=>isWK(p));
   const lefties = count(rem, p=>/left/i.test(String(p.batting_type||p.batting||"")));
   const bothDays = count(rem, p=>availabilityIsBothDays(p.availability));
   const cats = {
@@ -413,9 +413,15 @@ function miniRow(p){
 }
 function isLeftHand(hand){ return /left/i.test(String(hand||"")); }
 function isBowler(role){ return /bowl/i.test(String(role||"")); }
+function isWK(p){
+  const flag = String(p.wk||"").trim().toLowerCase();
+  const byFlag = flag==="y" || flag==="yes" || flag==="true" || flag==="1";
+  const byRole = /wk|wicket/i.test(String(p.skill||""));
+  return byFlag || byRole;
+}
 function complianceForMySquad(){
   const mine=(state.players||[]).filter(p=>p.owner===state.myClubSlug&&p.status==="won");
-  const wk=mine.filter(p=>/wk/i.test(String(p.skill||""))).length;
+  const wk=mine.filter(p=>isWK(p)).length;
   const lhb=mine.filter(p=>isLeftHand(p.batting_type||p.batting||"")).length;
   const bowl=mine.filter(p=>isBowler(p.skill)||/all/i.test(String(p.skill||""))).length;
   return { wk, lhb, bowl };
