@@ -84,11 +84,41 @@ const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
 function toNum(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 function normalizeHeader(s) { return String(s||"").trim().toLowerCase().replace(/\s+/g," "); }
 function show(el, on=true) { if (!el) return; el.style.display = on ? "block" : "none"; }
+// Replace the old function with this:
 function availabilityIsBothDays(av) {
-  const s = String(av||"").toLowerCase();
+  const s = String(av || "").trim();
   if (!s) return false;
-  return /(both|two\s*days|day\s*1\s*and\s*day\s*2|sat\s*&\s*sun|saturday.*sunday|both\s*days)/i.test(s);
+
+  // 1) Quick textual wins (still keep them)
+  if (/(both\s*days|two\s*days|day\s*1\s*and\s*day\s*2|sat\s*&\s*sun|saturday.*sunday)/i.test(s)) {
+    return true;
+  }
+
+  // 2) Date-based formats like "Jan 9;Jan 16", "Jan 9 & Jan 16", "Jan 9, Jan 16"
+  //    We detect month names and count distinct date-like mentions.
+  const monthRx = /(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*/i;
+  const dateLike = s.match(
+    /(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[^0-9]{0,5}\d{1,2}/gi
+  );
+
+  // If we see 2+ date-like entries, assume both days available
+  if (dateLike && dateLike.length >= 2) return true;
+
+  // 3) Also handle compact tokens like "Jan 9;Jan 16" or "Jan 9 Jan 16" etc.
+  //    Tokenize by separators and count how many day numbers we have alongside a month.
+  const tokens = s.split(/[^a-z0-9]+/i).filter(Boolean);
+  const hasMonth = tokens.some(t => monthRx.test(t));
+  const dayNums = tokens.filter(t => /^\d{1,2}$/.test(t));
+
+  if (hasMonth && dayNums.length >= 2) return true;
+
+  // 4) Very specific fallback for your case (if someone writes without space like "Jan9;Jan16")
+  if (/jan\s*9.*jan\s*16/i.test(s)) return true;
+
+  // Otherwise treat as single-day (low availability)
+  return false;
 }
+
 
 /* ============= Clubs (seed 8 fixed) ============= */
 function ensureDefaultClubsSeeded() {
