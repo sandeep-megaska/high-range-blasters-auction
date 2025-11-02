@@ -81,7 +81,7 @@
           <input id="cfgTotalPoints" type="number" value="15000" />
         </label>
         <label style="flex:1; min-width:200px;">Guardrail min base per slot
-          <input id="cfgGuardMin" type="number" value="250" />
+          <input id="cfgGuardMin" type="number" value="200" />
         </label>
       </div>
 
@@ -135,7 +135,7 @@
       <div class="topbar">
         <div class="stat">Remaining Points: <b id="remainingPoints">0</b></div>
         <div class="stat">Remaining Slots: <b id="remainingSlots">0</b></div>
-        <div class="stat" id="guardrail">Guardrail (min per slot): <b>250</b></div>
+        <div class="stat" id="guardrail">Guardrail (min per slot): <b>200</b></div>
         <div class="right">
           <button id="btn-export" class="btn btn-ghost">Export Won (CSV)</button>
           <button id="btn-logout" class="btn btn-ghost">Logout</button>
@@ -181,7 +181,7 @@
                 <datalist id="clubNames"></datalist>
               </label>
               <label style="flex:1; min-width:140px;">Final Bid
-                <input id="passBidAmount" type="number" placeholder="900" />
+                <input id="passBidAmount" type="number" min="200" placeholder="900" />
               </label>
               <button id="btn-assign-to-club" class="btn" style="align-self:flex-end;">Assign</button>
             </div>
