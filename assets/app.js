@@ -429,13 +429,28 @@ function renderLiveBid(){
       <div id="bidWarn" class="hint" style="margin-top:6px;color:#dc2626"></div>
     </div>`;
   const bidEl=$("bidInput"), wonBtn=$("btn-mark-won"), warnEl=$("bidWarn");
-  const validate=()=>{
-    const price=Number(bidEl.value);
-    if (!Number.isFinite(price) || price<0){ warnEl.textContent = price ? "Enter a valid amount." : ""; wonBtn.disabled=true; return false; }
-    const ok = guardrailOK(price); wonBtn.disabled = !ok;
-    const floor = Math.max(0, (remainingSlots()-1) * (state.minBasePerPlayer||DEFAULT_MIN_BASE));
-    warnEl.textContent = ok ? "" : `Guardrail: keep ≥ ${floor} for remaining slots.`; return ok;
-  };
+ // inside renderLiveBid(), replace the existing validate() with this:
+const validate = () => {
+  const raw = bidEl.value;
+  // invalid if empty, whitespace, NaN, or <= 0
+  if (!raw || !String(raw).trim().length) {
+    warnEl.textContent = "Enter a bid (> 0).";
+    wonBtn.disabled = true;
+    return false;
+  }
+  const price = Number(raw);
+  if (!Number.isFinite(price) || price <= 0) {
+    warnEl.textContent = "Enter a bid (> 0).";
+    wonBtn.disabled = true;
+    return false;
+  }
+  const ok = guardrailOK(price);
+  wonBtn.disabled = !ok;
+  const floor = Math.max(0, (remainingSlots() - 1) * (state.minBasePerPlayer || DEFAULT_MIN_BASE));
+  warnEl.textContent = ok ? "" : `Guardrail: keep ≥ ${floor} for remaining slots.`;
+  return ok;
+};
+
   bidEl.addEventListener("input", validate); validate();
   wonBtn.addEventListener("click", ()=>{ if(!validate()) return; markWon(p.id, Number(bidEl.value)); });
   $("btn-pass")?.addEventListener("click", ()=>{
