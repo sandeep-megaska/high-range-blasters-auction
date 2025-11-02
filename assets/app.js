@@ -1,507 +1,394 @@
-/* assets/app.js — HRB Auction Assist (login + settings + guardrails + compliance)
-   Works with <script defer src="./assets/app.js?v=..."></script>
-*/
-const APP_BUILD = "hrb-2025-11-02-15"; // <— change each time you deploy
+/* HRB Auction Assist — hard-coded 8 clubs, per-club preselected, guardrail, typeahead, compliance, reset on logout */
+const APP_BUILD = "hrb-2025-11-02-16";
 console.log("[HRB] build:", APP_BUILD);
-window.__diag && window.__diag("build=" + APP_BUILD);
 
-/* ===========================
-   Double-load guard
-=========================== */
-if (window.__HRB_APP_LOADED__) {
-  console.warn("app.js loaded twice; ignoring second load");
-  throw new Error("DUP_LOAD");
-}
+/* ============= Double-load guard ============= */
+if (window.__HRB_APP_LOADED__) { throw new Error("DUP_LOAD"); }
 window.__HRB_APP_LOADED__ = true;
 
-/* ===========================
-   Tiny Diagnostics
-=========================== */
+/* ============= Tiny Diagnostics Chip ============= */
 (function () {
   const bar = document.createElement("div");
   bar.id = "diag";
   bar.style.cssText =
     "position:fixed;left:10px;bottom:10px;z-index:99999;background:#111;color:#fff;padding:6px 10px;border-radius:8px;font:12px/1.4 system-ui";
-  bar.textContent = "⏳ loading app.js...";
-  document.addEventListener("DOMContentLoaded", () => (bar.textContent = "✅ DOM ready, booting..."));
-  window.addEventListener("error", (e) => (bar.textContent = "❌ JS error: " + e.message));
-  document.body.appendChild(bar);
+  bar.textContent = "✅ build " + APP_BUILD;
   window.__diag = (msg) => (bar.textContent = "ℹ️ " + msg);
+  document.addEventListener("DOMContentLoaded", () => document.body.appendChild(bar));
 })();
 
-/* ===========================
-   State & Persistence
-=========================== */
+/* ============= Constants ============= */
+const DEFAULT_PLAYERS_CAP = 15;
+const DEFAULT_TOTAL_POINTS = 15000;
+const DEFAULT_MIN_BASE = 250;
+const MUST_BID_RATING = 8;
+
+const DEFAULT_CLUBS = [
+  { name: "High Range Blasters", slug: "high-range-blasters", logo_url: "./assets/highrange.svg" },
+  { name: "Black Panthers", slug: "black-panthers", logo_url: "" },
+  { name: "White Elephants", slug: "white-elephants", logo_url: "" },
+  { name: "Kerala Tuskers", slug: "kerala-tuskers", logo_url: "" },
+  { name: "Warbow Wolverines", slug: "warbow-wolverines", logo_url: "" },
+  { name: "Venad Warriers", slug: "venad-warriers", logo_url: "" },
+  { name: "Thiruvalla Warriers", slug: "thiruvalla-warriers", logo_url: "" },
+  { name: "God's Own XI", slug: "gods-own-xi", logo_url: "" },
+];
+
+/* ============= State & Persistence ============= */
 let state = {
-  players: [],                         // {id,name,alumni,phone,role,batting_hand,is_wk,rating,category,base,status,finalBid,owner}
+  players: [],
   auth: { loggedIn: false, user: null },
-  playersNeeded: 15,
-  totalPoints: 15000,
-  minBasePerPlayer: 250,
+  playersNeeded: DEFAULT_PLAYERS_CAP,
+  totalPoints: DEFAULT_TOTAL_POINTS,
+  minBasePerPlayer: DEFAULT_MIN_BASE,
   categoryBase: { c1: null, c2: null, c3: null, c4: null, c5: null },
-  preselectedMap: {},
+  preselectedMap: {},        // legacy HRB-only
+  preselectedByClub: {},     // { slug: { nameLower: price, ... }, ... }
   myClubSlug: "high-range-blasters",
-  clubs: [],                           // {id,slug,name,logo_url,starting_budget,budget_left}
+  clubs: [],
   activePlayerId: null,
 };
 
-// Factory state for a brand-new auction
 function factoryState() {
   return {
     players: [],
     auth: { loggedIn: false, user: null },
-    playersNeeded: 15,
-    totalPoints: 15000,
-    minBasePerPlayer: 250,
+    playersNeeded: DEFAULT_PLAYERS_CAP,
+    totalPoints: DEFAULT_TOTAL_POINTS,
+    minBasePerPlayer: DEFAULT_MIN_BASE,
     categoryBase: { c1: null, c2: null, c3: null, c4: null, c5: null },
     preselectedMap: {},
+    preselectedByClub: {},
     myClubSlug: "high-range-blasters",
     clubs: [],
     activePlayerId: null,
   };
 }
 
-// Hard reset everything (fresh boot)
-async function fullReset() {
-  localStorage.removeItem("hrb-auction-state");
-  state = factoryState();
-  await ensureMyClubSeeded();
-  persist();
-}
-
-// Soft reset: keep players but clear wins & spend; reset budgets to totalPoints
-async function resetAuctionDataKeepPlayers() {
-  (state.players || []).forEach((p) => {
-    p.status = "new";
-    p.owner = null;
-    p.finalBid = null;
-  });
-  state.preselectedMap = {};
-  state.clubs = [];
-  await ensureMyClubSeeded();
-  persist();
-}
-
-function persist() {
-  try {
-    localStorage.setItem("hrb-auction-state", JSON.stringify(state));
-  } catch {}
-}
+function persist() { try { localStorage.setItem("hrb-auction-state", JSON.stringify(state)); } catch {} }
 function load() {
   try {
     const s = JSON.parse(localStorage.getItem("hrb-auction-state") || "{}");
     if (s && typeof s === "object") {
       state = { ...state, ...s };
-      state.categoryBase = { c1: null, c2: null, c3: null, c4: null, c5: null, ...(s.categoryBase || {}) };
+      state.categoryBase = { c1:null,c2:null,c3:null,c4:null,c5:null, ...(s.categoryBase||{}) };
       state.preselectedMap = s.preselectedMap || {};
+      state.preselectedByClub = s.preselectedByClub || {};
     }
   } catch {}
 }
 
-/* ===========================
-   Utils
-=========================== */
+/* ============= Utils ============= */
 const $ = (id) => document.getElementById(id);
-const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
-function slugify(s) {
-  return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-}
-function toNum(v, d = 0) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : d;
-}
-function normalizeHeader(s) {
-  return String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
-}
-function show(el, on = true) {
-  if (!el) return;
-  el.style.display = on ? "block" : "none"; // force override CSS display:none
-}
-function isHidden(el) {
-  return !el || getComputedStyle(el).display === "none";
+const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
+function toNum(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
+function normalizeHeader(s) { return String(s||"").trim().toLowerCase().replace(/\s+/g," "); }
+function show(el, on=true) { if (!el) return; el.style.display = on ? "block" : "none"; }
+function availabilityIsBothDays(av) {
+  const s = String(av||"").toLowerCase();
+  if (!s) return false;
+  return /(both|two\s*days|day\s*1\s*and\s*day\s*2|sat\s*&\s*sun|saturday.*sunday|both\s*days)/i.test(s);
 }
 
-/* ===========================
-   Roster / Budget helpers
-=========================== */
-function myClub() {
-  return (state.clubs || []).find((c) => c.slug === state.myClubSlug) || null;
+/* ============= Clubs (seed 8 fixed) ============= */
+function ensureDefaultClubsSeeded() {
+  if (!state.clubs) state.clubs = [];
+  const have = new Set(state.clubs.map(c=>c.slug));
+  DEFAULT_CLUBS.forEach(def => {
+    if (!have.has(def.slug)) {
+      state.clubs.push({
+        id: `local-${def.slug}`,
+        slug: def.slug,
+        name: def.name,
+        logo_url: def.logo_url || "",
+        starting_budget: state.totalPoints || DEFAULT_TOTAL_POINTS,
+        budget_left: state.totalPoints || DEFAULT_TOTAL_POINTS,
+      });
+    } else {
+      const c = state.clubs.find(x=>x.slug===def.slug);
+      if (c && toNum(c.starting_budget) !== toNum(state.totalPoints)) {
+        const spent = (state.players||[])
+          .filter(p=>p.owner===def.slug && p.status==="won")
+          .reduce((s,p)=>s+toNum(p.finalBid,0),0);
+        c.starting_budget = toNum(state.totalPoints, DEFAULT_TOTAL_POINTS);
+        c.budget_left = Math.max(0, c.starting_budget - spent);
+      }
+    }
+  });
+  persist();
 }
+function myClub() { return (state.clubs||[]).find(c=>c.slug===state.myClubSlug) || null; }
+function getOtherClubs() { return (state.clubs||[]).filter(c=>c.slug !== state.myClubSlug); }
+function clubStats(slug) {
+  const players = (state.players||[]).filter(p=>p.owner===slug && p.status==="won");
+  const spend = players.reduce((s,p)=>s+toNum(p.finalBid,0),0);
+  const c = (state.clubs||[]).find(c=>c.slug===slug);
+  const budgetLeft = c ? Math.max(0, toNum(c.starting_budget,0)-spend) : 0;
+  const cap = state.playersNeeded || DEFAULT_PLAYERS_CAP;
+  return { players, count: players.length, spend, budgetLeft, balancePlayers: Math.max(0, cap - players.length) };
+}
+
+/* ============= Budget / Guardrail ============= */
 function remainingSlots() {
-  const mine = (state.players || []).filter((p) => p.owner === state.myClubSlug && p.status === "won").length;
-  return Math.max(0, (state.playersNeeded || 15) - mine);
+  const mine = (state.players||[]).filter(p=>p.owner===state.myClubSlug && p.status==="won").length;
+  return Math.max(0, (state.playersNeeded||DEFAULT_PLAYERS_CAP) - mine);
 }
 function remainingBudget(clubSlug) {
-  const c = (state.clubs || []).find((c) => c.slug === clubSlug);
+  const c = (state.clubs||[]).find(c=>c.slug===clubSlug);
   if (!c) return 0;
-  return toNum(c.budget_left, c.starting_budget || 0);
+  return toNum(c.budget_left, c.starting_budget||0);
 }
 function guardrailOK(bid) {
   const rem = remainingSlots();
-  const floor = state.minBasePerPlayer || 250;
+  const floor = state.minBasePerPlayer || DEFAULT_MIN_BASE;
   const bud = remainingBudget(state.myClubSlug);
   return bid <= bud && bud - bid >= (rem - 1) * floor;
 }
 
-/* ===========================
-   Supabase (optional, safe)
-=========================== */
-function supabaseAvailable() {
-  return !!(window.ENV?.SUPABASE_URL && window.ENV?.SUPABASE_ANON_KEY && window.supabase?.createClient);
-}
-let sb = null;
-if (supabaseAvailable()) {
-  sb = window.supabase.createClient(window.ENV.SUPABASE_URL, window.ENV.SUPABASE_ANON_KEY);
-}
-
-/* ===========================
-   Clubs
-=========================== */
-async function ensureMyClubSeeded() {
-  if (!state.clubs) state.clubs = [];
-  if (!state.clubs.some((c) => c.slug === state.myClubSlug)) {
-    const start = state.totalPoints || 15000;
-    state.clubs.push({
-      id: `local-${Date.now()}`,
-      slug: state.myClubSlug,
-      name: "High Range Blasters",
-      logo_url: "./assets/highrange.svg",
-      starting_budget: start,
-      budget_left: start,
-    });
-    persist();
-  } else {
-    const c = myClub();
-    if (c && toNum(c.starting_budget) !== toNum(state.totalPoints)) {
-      const spent = (state.players || [])
-        .filter((p) => p.owner === state.myClubSlug && p.status === "won")
-        .reduce((s, p) => s + toNum(p.finalBid, 0), 0);
-      c.starting_budget = toNum(state.totalPoints, 15000);
-      c.budget_left = Math.max(0, c.starting_budget - spent);
-      persist();
-    }
-  }
-}
-function getOtherClubs() {
-  return (state.clubs || []).filter((c) => c.slug !== state.myClubSlug);
-}
-async function addClubLocal({ name, logo_url, starting_budget }) {
-  const slug = slugify(name);
-  if (!slug) throw new Error("Enter club name");
-  if ((state.clubs || []).some((c) => c.slug === slug)) throw new Error("Club already exists");
-  const start = toNum(starting_budget, 15000);
-  state.clubs.push({
-    id: `local-${Date.now()}`,
-    slug,
-    name: name.trim(),
-    logo_url: logo_url || "",
-    starting_budget: start,
-    budget_left: start,
-  });
-  persist();
-}
-function clubStats(slug) {
-  const players = (state.players || []).filter((p) => p.owner === slug && p.status === "won");
-  const spend = players.reduce((s, p) => s + toNum(p.finalBid, 0), 0);
-  const c = (state.clubs || []).find((c) => c.slug === slug);
-  const budgetLeft = c ? Math.max(0, toNum(c.starting_budget, 0) - spend) : 0;
-  return { players, count: players.length, spend, budgetLeft };
-}
-
-/* ===========================
-   CSV parsing
-=========================== */
+/* ============= CSV parsing (TEC headers) ============= */
 function splitCsv(text) {
-  const rows = [];
-  const row = [];
-  const pushRow = () => rows.push(row.splice(0, row.length));
-  let cell = "",
-    inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i],
-      nx = text[i + 1];
-    if (inQ) {
-      if (ch === '"' && nx === '"') {
-        cell += '"';
-        i++;
-        continue;
-      }
-      if (ch === '"') {
-        inQ = false;
-        continue;
-      }
-      cell += ch;
-      continue;
-    }
-    if (ch === '"') {
-      inQ = true;
-      continue;
-    }
-    if (ch === ",") {
-      row.push(cell);
-      cell = "";
-      continue;
-    }
-    if (ch === "\n") {
-      row.push(cell);
-      cell = "";
-      pushRow();
-      continue;
-    }
-    cell += ch;
+  const rows=[], row=[], push=()=>rows.push(row.splice(0,row.length));
+  let cell="", inQ=false;
+  for (let i=0;i<text.length;i++) {
+    const ch=text[i], nx=text[i+1];
+    if (inQ) { if (ch==='"' && nx==='"'){cell+='"';i++;continue;}
+      if (ch==='"'){inQ=false;continue;} cell+=ch; continue; }
+    if (ch==='"'){inQ=true;continue;}
+    if (ch===','){row.push(cell);cell="";continue;}
+    if (ch==='\n'){row.push(cell);cell="";push();continue;}
+    cell+=ch;
   }
-  row.push(cell);
-  pushRow();
-  return rows;
+  row.push(cell); push(); return rows;
 }
 function parseCSVPlayers(raw) {
-  const rows = splitCsv(raw).filter((r) => r.some((c) => String(c).trim() !== ""));
+  const rows = splitCsv(raw).filter(r=>r.some(c=>String(c).trim()!==""));
   if (!rows.length) return [];
-  const headerIdx = rows.findIndex((r) => {
+  const headerIdx = rows.findIndex(r=> {
     const h = r.map(normalizeHeader);
     return h.includes("name") || h.includes("player name") || h.includes("player");
   });
-  if (headerIdx < 0) return [];
+  if (headerIdx<0) return [];
   const header = rows[headerIdx].map(normalizeHeader);
-  const body = rows.slice(headerIdx + 1);
+  const body = rows.slice(headerIdx+1);
 
-  const idx = (...aliases) => {
-    for (const a of aliases) {
-      const i = header.indexOf(a);
-      if (i >= 0) return i;
-    }
-    return -1;
-  };
-  const iName = idx("name", "player name", "player");
-  const iRate = idx("rating", "rank", "rating10", "grade");
-  const iAlmn = idx("alumni", "college", "institute");
-  const iRole = idx("role", "playing role", "type");
-  const iHand = idx("batting hand", "batting_hand", "hand");
-  const iWK = idx("wk", "wicket keeper", "is_wk", "keeper");
-  const iBase = idx("base", "seed", "start bid", "seed base", "base value");
-  const iCat = idx("category", "cat");
-  const iPhone = idx("phone", "phone number", "mobile", "mobile number", "contact", "whatsapp", "whatsapp number", "ph");
+  const idx = (...aliases)=>{ for(const a of aliases){const i=header.indexOf(a); if(i>=0) return i;} return -1; };
 
-  const yes = (v) => /^(true|yes|y|1)$/i.test(String(v || "").trim());
+  const iName  = idx("name","player name","player");
+  const iRate  = idx("rating","rank","rating10","grade");
+  const iAlmNm = idx("alumni member name","alumni name","member name");
+  const iAlmn  = idx("alumni","college","institute");
+  const iDob   = idx("dob","date of birth");
+  const iSkill = idx("skill","playing role","role");
+  const iBat   = idx("batting","batting hand");
+  const iBowl  = idx("bowling");
+  const iAvail = idx("availability");
+  const iPhone = idx("player contact number","phone","mobile","whatsapp","contact");
+  const yes = (v)=>/^(true|yes|y|1)$/i.test(String(v||"").trim());
 
-  const players = [];
-  body.forEach((cols, i) => {
-    const name = (cols[iName] || "").trim();
+  const players=[];
+  body.forEach((cols,i)=>{
+    const name = (cols[iName]||"").trim();
     if (!name) return;
-    const ratingRaw = iRate >= 0 ? String(cols[iRate]).trim() : "";
-    const rating = ratingRaw === "" ? null : Number(ratingRaw);
-    const alumni = iAlmn >= 0 ? String(cols[iAlmn]).trim() : "";
-    const role = iRole >= 0 ? String(cols[iRole]).trim() : "";
-    const hand = iHand >= 0 ? String(cols[iHand]).trim() : "";
-    const is_wk = iWK >= 0 ? yes(cols[iWK]) : /wk|keeper/i.test(role);
-    const base = iBase >= 0 && String(cols[iBase]).trim() !== "" ? Number(cols[iBase]) : null;
-    const category = iCat >= 0 ? String(cols[iCat]).trim() : "";
-    const phone = iPhone >= 0 ? String(cols[iPhone]).trim() : "";
+    const ratingRaw = iRate>=0 ? String(cols[iRate]).trim() : "";
+    const rating = ratingRaw==="" ? null : Number(ratingRaw);
+    const alumniMember = iAlmNm>=0 ? String(cols[iAlmNm]).trim() : "";
+    const alumni = iAlmn>=0 ? String(cols[iAlmn]).trim() : alumniMember;
+    const dob = iDob>=0 ? String(cols[iDob]).trim() : "";
+    const skill = iSkill>=0 ? String(cols[iSkill]).trim() : "";
+    const batting = iBat>=0 ? String(cols[iBat]).trim() : "";
+    const bowling = iBowl>=0 ? String(cols[iBowl]).trim() : "";
+    const availability = iAvail>=0 ? String(cols[iAvail]).trim() : "";
+    const phone = iPhone>=0 ? String(cols[iPhone]).trim() : "";
+    const is_wk = /wk|keeper/i.test(skill) || /wk/i.test(batting);
+
     players.push({
-      id: String(i + 1),
-      name,
-      alumni,
-      phone,
-      role,
-      batting_hand: hand,
+      id: String(i+1),
+      name, alumni, phone,
+      role: skill,
+      batting_hand: batting,
       is_wk: Boolean(is_wk),
       rating,
-      category: category || null,
-      base: base == null ? null : base,
+      category: null,
+      base: null,
       status: "new",
+      dob, skill, batting, bowling, availability
     });
   });
   return players;
 }
 
-/* ===========================
-   Live bid / mutations
-=========================== */
-function setActivePlayer(id) {
-  state.activePlayerId = id || null;
+/* ============= Preselected (per-club) ============= */
+function parsePreselectedText(txt, fallback) {
+  const out={}; const raw=String(txt||"").trim(); if(!raw) return out;
+  if (raw.includes("=")) {
+    raw.split(";").forEach(part=>{
+      const s=part.trim(); if(!s) return;
+      const [name,val]=s.split("=").map(x=>x.trim());
+      if (name) out[name.toLowerCase()]=toNum(val,0);
+    });
+  } else { out[raw.toLowerCase()] = toNum(fallback,0); }
+  return out;
+}
+function applyPreselectedForClub(clubSlug) {
+  const map = (state.preselectedByClub||{})[clubSlug] || {};
+  const names = Object.keys(map); if (!names.length) return 0;
+  let spent=0;
+  (state.players||[]).forEach(p=>{
+    const key=(p.name||"").toLowerCase();
+    if (!map[key]) return;
+    if (p.status==="won" && p.owner===clubSlug) return;
+    p.status="won"; p.owner=clubSlug; p.finalBid=toNum(map[key],0);
+    spent += p.finalBid;
+  });
+  return spent;
+}
+function recomputeBudgetsFromWins() {
+  (state.clubs||[]).forEach(c=>{
+    const spent = (state.players||[]).filter(p=>p.owner===c.slug && p.status==="won")
+      .reduce((s,p)=>s+toNum(p.finalBid,0),0);
+    c.starting_budget = toNum(state.totalPoints, DEFAULT_TOTAL_POINTS);
+    c.budget_left = Math.max(0, c.starting_budget - spent);
+  });
+}
+function applyPreselectedAllClubs() {
+  (state.clubs||[]).forEach(c=> applyPreselectedForClub(c.slug));
+  recomputeBudgetsFromWins();
   persist();
-  renderLiveBid();
 }
-function getActivePlayer() {
-  return (state.players || []).find((p) => p.id === state.activePlayerId) || null;
-}
-function markWon(playerId, price) {
-  const p = (state.players || []).find((x) => x.id === playerId);
-  if (!p) return;
-  const bid = toNum(price, p.base || 0);
-  if (!guardrailOK(bid)) {
-    alert("Guardrail violated. Reduce bid.");
-    return;
-  }
-  p.status = "won";
-  p.finalBid = bid;
-  p.owner = state.myClubSlug;
 
-  const c = myClub();
-  if (c) {
-    c.budget_left = Math.max(0, toNum(c.budget_left, c.starting_budget || 0) - bid);
-  }
-  persist();
-  render();
+/* ============= Live Bid ============= */
+function setActivePlayer(id){ state.activePlayerId = id||null; persist(); renderLiveBid(); }
+function getActivePlayer(){ return (state.players||[]).find(p=>p.id===state.activePlayerId) || null; }
+function markWon(playerId, price) {
+  const p=(state.players||[]).find(x=>x.id===playerId); if(!p) return;
+  const bid = toNum(price, p.base||0);
+  if (!guardrailOK(bid)) { alert("Guardrail violated. Reduce bid."); return; }
+  p.status="won"; p.finalBid=bid; p.owner=state.myClubSlug;
+  recomputeBudgetsFromWins(); persist(); render();
 }
 function assignToClubByNameOrSlug(playerId, clubText, price) {
-  const others = getOtherClubs();
-  let club = others.find((c) => c.slug === clubText);
+  const clubs = state.clubs||[];
+  let club = clubs.find(c=>c.slug===clubText);
   if (!club) {
-    const name = String(clubText || "").trim().toLowerCase();
-    club =
-      others.find((c) => (c.name || "").toLowerCase() === name) ||
-      others.find((c) => (c.name || "").toLowerCase().startsWith(name));
+    const name = String(clubText||"").trim().toLowerCase();
+    club = clubs.find(c=>(c.name||"").toLowerCase()===name) ||
+           clubs.find(c=>(c.name||"").toLowerCase().startsWith(name));
   }
   const msg = $("passPanelMsg");
-  if (!club) {
-    if (msg) msg.textContent = "Pick a valid club from the list.";
-    return;
-  }
-
-  const p = (state.players || []).find((x) => x.id === playerId);
-  if (!p) return;
-  const bid = Math.max(0, toNum(price, p.base || 0));
-
-  p.status = "won";
-  p.finalBid = bid;
-  p.owner = club.slug;
-  club.budget_left = Math.max(0, toNum(club.budget_left, club.starting_budget || 0) - bid);
-
-  persist();
-  render();
+  if (!club) { if (msg) msg.textContent="Pick a valid club from the list."; return; }
+  const p=(state.players||[]).find(x=>x.id===playerId); if(!p) return;
+  const bid = Math.max(0, toNum(price, p.base||0));
+  p.status="won"; p.finalBid=bid; p.owner=club.slug;
+  recomputeBudgetsFromWins(); persist(); render();
 }
 
-/* ===========================
-   Minimal item row
-=========================== */
-function miniRow(p) {
-  const alumni = p.alumni || "";
-  const phone = p.phone || "";
-  const sep = alumni && phone ? " · " : "";
+/* ============= UI helpers ============= */
+function miniRow(p){
+  const alumni=p.alumni||"", phone=p.phone||"", sep = alumni && phone ? " · " : "";
   return `
     <div class="mini-row" style="padding:6px 0;border-bottom:1px solid #eef1f4">
       <div style="font-size:14px;font-weight:700">${p.name || "-"}</div>
       <div style="font-size:12px;color:#6b7280">${alumni}${sep}${phone}</div>
-    </div>
-  `;
+    </div>`;
 }
-
-/* ===========================
-   Compliance (WK, LHB, Bowl)
-=========================== */
-function isLeftHand(battingHand) {
-  return /left/i.test(String(battingHand || ""));
-}
-function isBowler(role) {
-  return /bowl/i.test(String(role || "")); // covers "Bowler", "Allrounder (Bowling)", etc.
-}
-function complianceForMySquad() {
-  const mine = (state.players || []).filter((p) => p.owner === state.myClubSlug && p.status === "won");
-  const wk = mine.filter((p) => p.is_wk).length;
-  const lhb = mine.filter((p) => isLeftHand(p.batting_hand)).length;
-  const bowl = mine.filter((p) => isBowler(p.role) || /all/i.test(p.role)).length;
+function isLeftHand(battingHand){ return /left/i.test(String(battingHand||"")); }
+function isBowler(role){ return /bowl/i.test(String(role||"")); }
+function complianceForMySquad(){
+  const mine=(state.players||[]).filter(p=>p.owner===state.myClubSlug && p.status==="won");
+  const wk = mine.filter(p=>p.is_wk).length;
+  const lhb = mine.filter(p=>isLeftHand(p.batting_hand)).length;
+  const bowl = mine.filter(p=>isBowler(p.role) || /all/i.test(p.role)).length;
   return { wk, lhb, bowl };
 }
-function renderComplianceBar() {
-  const root = $("complianceBar");
-  if (!root) return;
-  const { wk, lhb, bowl } = complianceForMySquad();
-  const need = { wk: 2, lhb: 2, bowl: 8 };
-  const ok = (cur, req) => `<b style="color:${cur >= req ? "#16a34a" : "#dc2626"}">${cur}/${req}</b>`;
-  root.innerHTML = `
-    <div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:8px">
-      <span>WK: ${ok(wk, need.wk)}</span>
-      <span>Left-hand batters: ${ok(lhb, need.lhb)}</span>
-      <span>Bowlers: ${ok(bowl, need.bowl)}</span>
-    </div>
-  `;
-}
 
-/* ===========================
-   Renderers
-=========================== */
-function renderPlayersList() {
-  const root = $("playersList");
-  const counter = $("playersCount");
-  if (!root) return;
-
-  const remaining = (state.players || []).filter((p) => p.status !== "won");
+/* ============= Renderers ============= */
+function renderPlayersList(){
+  const root=$("playersList"), counter=$("playersCount"); if(!root) return;
+  const remaining=(state.players||[]).filter(p=>p.status!=="won");
   if (counter) counter.textContent = `(${remaining.length})`;
-
-  root.innerHTML = remaining.length
-    ? remaining
-        .map(
-          (p) => `
-        <div class="item" style="padding:10px;border-bottom:1px solid #eee">
-          <div class="row" style="display:flex;justify-content:space-between;gap:8px">
-            <div>
-              <div><b>${p.name}</b></div>
-              <div class="meta" style="color:#6b7280">${p.alumni || ""}${p.alumni && p.phone ? " · " : ""}${p.phone || ""}</div>
+  root.innerHTML = remaining.length ? remaining.map(p=>{
+    const must = Number(p.rating||0) >= MUST_BID_RATING;
+    const lowAvail = !availabilityIsBothDays(p.availability);
+    const tags = [
+      must ? `<span style="background:#fde68a;color:#7c2d12;padding:2px 6px;border-radius:999px;font-size:11px;">Must Bid</span>` : "",
+      lowAvail ? `<span style="background:#fee2e2;color:#7f1d1d;padding:2px 6px;border-radius:999px;font-size:11px;">Low availability</span>` : ""
+    ].filter(Boolean).join(" ");
+    return `
+      <div class="item" style="padding:10px;border-bottom:1px solid #eee;${lowAvail?'opacity:.88;':''}">
+        <div class="row" style="display:flex;justify-content:space-between;gap:8px">
+          <div>
+            <div style="display:flex;gap:8px;align-items:center;"><b>${p.name}</b> ${tags}</div>
+            <div class="meta" style="color:#6b7280">
+              ${p.alumni||""}${p.alumni&&p.phone?" · ":""}${p.phone||""}
+              ${p.skill?" · "+p.skill:""}${p.batting?" · "+p.batting:""}${p.bowling?" · "+p.bowling:""}
+              ${Number.isFinite(p.rating)?" · Rating:"+p.rating:""}
             </div>
-            <button class="btn btn-ghost" data-id="${p.id}" data-action="pick">Pick</button>
           </div>
+          <button class="btn btn-ghost" data-id="${p.id}" data-action="pick">Pick</button>
         </div>
-      `
-        )
-        .join("")
-    : `<div class="hint">Import players to begin.</div>`;
-
-  root.querySelectorAll("[data-action='pick']").forEach((btn) => {
-    btn.addEventListener("click", () => setActivePlayer(btn.getAttribute("data-id")));
+      </div>`;
+  }).join("") : `<div class="hint">Import players to begin.</div>`;
+  root.querySelectorAll("[data-action='pick']").forEach(btn=>{
+    btn.addEventListener("click", ()=> setActivePlayer(btn.getAttribute("data-id")));
   });
 }
-
-function renderSelectedSquad() {
-  const root = $("selectedList");
-  if (!root) return;
-  const stats = clubStats(state.myClubSlug);
-  const header = `
-    <div class="row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-      <div class="meta">Players: <b>${stats.count}</b></div>
-    </div>
-  `;
+function renderSelectedSquad(){
+  const root=$("selectedList"); if(!root) return;
+  const stats=clubStats(state.myClubSlug);
+  const header = `<div class="row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    <div class="meta">Players: <b>${stats.count}</b></div></div>`;
   root.innerHTML = stats.players.length ? header + stats.players.map(miniRow).join("") : header + `<div class="hint">No players won yet.</div>`;
 }
-
-function renderOtherClubsPanel() {
-  const root = $("otherClubsPanel");
-  if (!root) return;
-  const others = getOtherClubs();
-  if (!others.length) {
-    root.innerHTML = `<div class="hint">Add clubs to see their squads.</div>`;
-    return;
-  }
-  root.innerHTML = others
-    .map((c) => {
-      const stats = clubStats(c.slug);
-      const list = stats.players.length ? stats.players.map(miniRow).join("") : `<div class="hint">No players yet.</div>`;
-      return `
+function renderOtherClubsPanel(){
+  const root=$("otherClubsPanel"); if(!root) return;
+  const others=(state.clubs||[]).filter(c=>c.slug!==state.myClubSlug);
+  root.innerHTML = others.map(c=>{
+    const s=clubStats(c.slug);
+    const list = s.players.length ? s.players.map(miniRow).join("") : `<div class="hint">No players yet.</div>`;
+    return `
       <div class="club-box" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:10px;background:#fff">
         <div class="club-head" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-          ${c.logo_url ? `<img src="${c.logo_url}" alt="${c.name}" style="width:24px;height:24px;border-radius:999px;object-fit:cover">` : ""}
-          <div style="font-size:14px"><b>${c.name}</b></div>
-          <div style="margin-left:auto;font-size:12px;color:#6b7280">Players: ${stats.count}</div>
+          ${c.logo_url?`<img src="${c.logo_url}" alt="${c.name}" style="width:24px;height:24px;border-radius:999px;object-fit:cover">`:""}
+          <div style="font-size:14px;"><b>${c.name}</b></div>
+          <div style="margin-left:auto;font-size:12px;color:#374151;">Balance players: <b>${s.balancePlayers}</b></div>
         </div>
+        <div style="font-size:12px;color:#374151;margin-bottom:6px;">Balance points: <b>${s.budgetLeft}</b></div>
         <div class="club-list" style="max-height:220px;overflow:auto">${list}</div>
-      </div>
-    `;
-    })
-    .join("");
+      </div>`;
+  }).join("");
 }
-
-function renderLiveBid() {
-  const live = $("liveBid");
-  if (!live) return;
-  const p = getActivePlayer();
-  if (!p) {
-    live.innerHTML = `<div class="hint">No active player. Use the Name picker or click Pick on the list.</div>`;
-    return;
-  }
+function renderComplianceBar(){
+  const root=$("complianceBar"); if(!root) return;
+  const {wk,lhb,bowl} = complianceForMySquad();
+  const need={wk:2, lhb:2, bowl:8};
+  const ok=(cur,req)=>`<b style="color:${cur>=req?"#16a34a":"#dc2626"}">${cur}/${req}</b>`;
+  root.innerHTML = `<div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:8px">
+    <span>WK: ${ok(wk,need.wk)}</span>
+    <span>Left-hand batters: ${ok(lhb,need.lhb)}</span>
+    <span>Bowlers: ${ok(bowl,need.bowl)}</span>
+  </div>`;
+}
+function renderLiveBid(){
+  const live=$("liveBid"); if(!live) return;
+  const p=getActivePlayer();
+  if (!p){ live.innerHTML = `<div class="hint">No active player. Use the Name picker or click Pick on the list.</div>`; return; }
+  const must = Number(p.rating||0) >= MUST_BID_RATING;
+  const lowAvail = !availabilityIsBothDays(p.availability);
+  const flags = [
+    must ? `<span style="background:#fde68a;color:#7c2d12;padding:2px 8px;border-radius:999px;font-size:12px;">Must Bid</span>` : "",
+    lowAvail ? `<span style="background:#fee2e2;color:#7f1d1d;padding:2px 8px;border-radius:999px;font-size:12px;">Low availability</span>` : ""
+  ].filter(Boolean).join(" ");
   live.innerHTML = `
     <div class="card" style="padding:12px">
-      <div style="font-size:18px;font-weight:700">${p.name}</div>
-      <div class="meta" style="color:#6b7280">${p.alumni || ""}${p.alumni && p.phone ? " · " : ""}${p.phone || ""}</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <div style="font-size:18px;font-weight:700">${p.name}</div>
+        ${flags}
+      </div>
+      <div class="meta" style="color:#6b7280">
+        ${p.alumni||""}${p.alumni&&p.phone?" · ":""}${p.phone||""}
+        ${p.skill?" · "+p.skill:""}${p.batting?" · "+p.batting:""}${p.bowling?" · "+p.bowling:""}
+        ${Number.isFinite(p.rating)?" · Rating:"+p.rating:""}${p.availability?" · "+p.availability:""}
+      </div>
       <div class="row" style="display:flex;gap:8px;margin-top:10px;align-items:flex-end;flex-wrap:wrap">
         <label style="flex:0 1 180px">Bid Amount
           <input id="bidInput" type="number" placeholder="e.g. 900" />
@@ -510,619 +397,252 @@ function renderLiveBid() {
         <button id="btn-pass" class="btn btn-ghost">Pass / Assign</button>
       </div>
       <div id="bidWarn" class="hint" style="margin-top:6px;color:#dc2626"></div>
-    </div>
-  `;
-
-  const bidEl = $("bidInput");
-  const wonBtn = $("btn-mark-won");
-  const warnEl = $("bidWarn");
-
-  const validate = () => {
-    const price = Number(bidEl.value);
-    if (!Number.isFinite(price) || price < 0) {
-      warnEl.textContent = price ? "Enter a valid positive amount." : "";
-      wonBtn.disabled = true;
-      return false;
-    }
-    const ok = guardrailOK(price);
-    wonBtn.disabled = !ok;
-    const floor = Math.max(0, (remainingSlots() - 1) * (state.minBasePerPlayer || 250));
-    warnEl.textContent = ok ? "" : `Guardrail: keep ≥ ${floor} for remaining slots.`;
-    return ok;
+    </div>`;
+  const bidEl=$("bidInput"), wonBtn=$("btn-mark-won"), warnEl=$("bidWarn");
+  const validate=()=>{
+    const price=Number(bidEl.value);
+    if (!Number.isFinite(price) || price<0){ warnEl.textContent = price ? "Enter a valid amount." : ""; wonBtn.disabled=true; return false; }
+    const ok = guardrailOK(price); wonBtn.disabled = !ok;
+    const floor = Math.max(0, (remainingSlots()-1) * (state.minBasePerPlayer||DEFAULT_MIN_BASE));
+    warnEl.textContent = ok ? "" : `Guardrail: keep ≥ ${floor} for remaining slots.`; return ok;
   };
-  bidEl.addEventListener("input", validate);
-  validate();
-
-  wonBtn.addEventListener("click", () => {
-    if (!validate()) return;
-    markWon(p.id, Number(bidEl.value));
-  });
-
-  $("btn-pass")?.addEventListener("click", () => {
-    const passPanel = $("passPanel");
-    if (passPanel) {
-      passPanel.style.display = "block";
-      passPanel.scrollIntoView({ behavior: "smooth", block: "center" });
-      wirePassPanelForPlayer(p);
-    }
+  bidEl.addEventListener("input", validate); validate();
+  wonBtn.addEventListener("click", ()=>{ if(!validate()) return; markWon(p.id, Number(bidEl.value)); });
+  $("btn-pass")?.addEventListener("click", ()=>{
+    const panel=$("passPanel"); if (!panel) return;
+    panel.style.display="block"; panel.scrollIntoView({behavior:"smooth", block:"center"});
+    wirePassPanelForPlayer(p);
   });
 }
-
-function updateHeaderStats() {
-  const c = myClub();
-  const remainingPts = c ? toNum(c.budget_left, c.starting_budget || 0) : 0;
-  const remSlots = remainingSlots();
-  const guardEl = $("guardrail");
+function updateHeaderStats(){
+  const c=myClub(); const remainingPts=c? toNum(c.budget_left, c.starting_budget||0):0;
+  const remSlots=remainingSlots(); const guardEl=$("guardrail");
   if ($("remainingPoints")) $("remainingPoints").textContent = remainingPts;
   if ($("remainingSlots")) $("remainingSlots").textContent = remSlots;
-  if (guardEl) guardEl.innerHTML = `Guardrail (min per slot): <b>${state.minBasePerPlayer || 250}</b>`;
+  if (guardEl) guardEl.innerHTML = `Guardrail (min per slot): <b>${state.minBasePerPlayer || DEFAULT_MIN_BASE}</b>`;
 }
+function render(){ renderPlayersList(); renderOtherClubsPanel(); renderLiveBid(); renderSelectedSquad(); renderComplianceBar(); updateHeaderStats(); }
 
-function render() {
-  renderPlayersList();
-  renderOtherClubsPanel();
-  renderLiveBid();
-  renderSelectedSquad();
-  renderComplianceBar();
-  updateHeaderStats();
-}
-
-/* ===========================
-   Pass / Assign Panel
-=========================== */
-function wirePassPanelForPlayer(p) {
-  const input = $("passClubInput");
-  const list = $("clubNames");
-  const amt = $("passBidAmount");
-  const msg = $("passPanelMsg");
-  const btn = $("btn-assign-to-club");
-
+/* ============= Pass / Assign panel ============= */
+function wirePassPanelForPlayer(p){
+  const input=$("passClubInput"), list=$("clubNames"), amt=$("passBidAmount"), msg=$("passPanelMsg"), btn=$("btn-assign-to-club");
   if (!list) return;
-  const others = getOtherClubs();
-  list.innerHTML = others.map((c) => `<option value="${c.name}"></option>`).join("");
-
+  const clubs=state.clubs||[];
+  list.innerHTML = clubs.map(c=>`<option value="${c.name}"></option>`).join("");
   if (amt) amt.value = $("bidInput")?.value || "";
-
-  if (btn) {
-    btn.onclick = null;
-    btn.addEventListener("click", () => {
-      if (msg) msg.textContent = "";
-      const clubText = (input?.value || "").trim();
-      const price = amt?.value || "";
-      assignToClubByNameOrSlug(p.id, clubText, price);
-    });
-  }
+  if (btn){ btn.onclick=null; btn.addEventListener("click", ()=>{
+    if (msg) msg.textContent="";
+    const clubText=(input?.value||"").trim(); const price=amt?.value||"";
+    assignToClubByNameOrSlug(p.id, clubText, price);
+  });}
 }
 
-/* ===========================
-   Import / Export wiring
-=========================== */
-function wireCsvImportUI() {
-  const urlEl = $("csvUrl");
-  const pasteEl = $("csvPaste");
-  const btnFetch = $("btn-fetch");
-  const btnImport = $("btn-import");
-  const btnClearUrl = $("btn-clear-url");
-  const btnClearPaste = $("btn-clear-paste");
-  const setMsg = (t) => {
-    const m = $("importMsg");
-    if (m) m.textContent = t;
-  };
+/* ============= Import / Export wiring ============= */
+function wireCsvImportUI(){
+  const urlEl=$("csvUrl"), pasteEl=$("csvPaste");
+  const btnFetch=$("btn-fetch"), btnImport=$("btn-import");
+  const btnClearUrl=$("btn-clear-url"), btnClearPaste=$("btn-clear-paste");
+  const setMsg=(t)=>{ const m=$("importMsg"); if(m) m.textContent=t; };
 
-  if (btnFetch && urlEl) {
-    btnFetch.onclick = null;
-    btnFetch.addEventListener("click", async () => {
-      try {
+  if (btnFetch && urlEl){
+    btnFetch.onclick=null; btnFetch.addEventListener("click", async ()=>{
+      try{
         setMsg("");
-        const url = (urlEl.value || "").trim();
-        if (!url) {
-          setMsg("Enter a Google Sheet CSV URL");
-          return;
-        }
-        const resp = await fetch(url, { cache: "no-store" });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const text = await resp.text();
-        if (pasteEl) pasteEl.value = text;
+        const url=(urlEl.value||"").trim(); if(!url){ setMsg("Enter a Google Sheet CSV URL"); return; }
+        const resp=await fetch(url,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const text=await resp.text(); if(pasteEl) pasteEl.value=text;
         setMsg("Fetched CSV — click Import to load players.");
-      } catch (e) {
-        console.error(e);
-        setMsg("Fetch failed. Ensure sheet is 'Published to the web' and URL ends with output=csv.");
-      }
+      }catch(e){ console.error(e); setMsg("Fetch failed. Ensure sheet is 'Published to the web' and URL ends with output=csv."); }
     });
   }
 
-  if (btnImport && pasteEl) {
-    btnImport.onclick = null;
-    btnImport.addEventListener("click", () => {
-      try {
+  if (btnImport && pasteEl){
+    btnImport.onclick=null; btnImport.addEventListener("click", ()=>{
+      try{
         setMsg("");
-        const raw = pasteEl.value || "";
-        if (!raw.trim()) {
-          setMsg("Paste CSV first or use Fetch CSV.");
-          return;
-        }
-
+        const raw=pasteEl.value||""; if(!raw.trim()){ setMsg("Paste CSV first or use Fetch CSV."); return; }
         let players = parseCSVPlayers(raw);
         if (!players.length) {
-          const rows = splitCsv(raw);
-          players = rows
-            .map((r, i) => {
-              const name = String(r[0] || "").trim();
-              if (!name) return null;
-              return { id: String(i + 1), name, alumni: String(r[1] || "").trim(), phone: String(r[2] || "").trim(), status: "new" };
-            })
-            .filter(Boolean);
+          const rows=splitCsv(raw);
+          players = rows.map((r,i)=>{
+            const name=String(r[0]||"").trim(); if(!name) return null;
+            return { id:String(i+1), name, alumni:String(r[1]||"").trim(), phone:String(r[2]||"").trim(), status:"new" };
+          }).filter(Boolean);
         }
+        players = players.map(p=> ({...p, status: p.status==="won" ? "won":"new"}));
+        state.players = players; state.playersNeeded = state.playersNeeded || DEFAULT_PLAYERS_CAP;
 
-        players = players.map((p) => ({ ...p, status: p.status === "won" ? "won" : "new" }));
+        // Apply all clubs’ preselected
+        applyPreselectedAllClubs();
 
-        state.players = players;
-        state.playersNeeded = state.playersNeeded || 15;
-
-        applyPreselectedToRoster();
-
-        persist();
-        render();
+        persist(); render();
         setMsg(`Imported ${players.length} players.`);
-        $("playersList")?.scrollIntoView({ behavior: "smooth", block: "start" });
-      } catch (e) {
-        console.error(e);
-        setMsg("Import failed. Check console.");
-      }
+        $("playersList")?.scrollIntoView({behavior:"smooth", block:"start"});
+      }catch(e){ console.error(e); setMsg("Import failed. Check console."); }
     });
   }
-
-  if (btnClearUrl && urlEl) {
-    btnClearUrl.onclick = null;
-    btnClearUrl.addEventListener("click", () => {
-      urlEl.value = "";
-      const m = $("importMsg");
-      if (m) m.textContent = "";
-    });
-  }
-  if (btnClearPaste && pasteEl) {
-    btnClearPaste.onclick = null;
-    btnClearPaste.addEventListener("click", () => {
-      pasteEl.value = "";
-      const m = $("importMsg");
-      if (m) m.textContent = "";
-    });
-  }
+  if (btnClearUrl && urlEl){ btnClearUrl.onclick=null; btnClearUrl.addEventListener("click", ()=>{ urlEl.value=""; const m=$("importMsg"); if(m) m.textContent=""; }); }
+  if (btnClearPaste && pasteEl){ btnClearPaste.onclick=null; btnClearPaste.addEventListener("click", ()=>{ pasteEl.value=""; const m=$("importMsg"); if(m) m.textContent=""; }); }
 }
-
-function exportWonCSV() {
-  const won = (state.players || []).filter((p) => p.status === "won");
-  const rows = [["Club", "Player Name", "Alumni", "Phone"]];
-  won.forEach((p) => {
-    const club = (state.clubs || []).find((c) => c.slug === p.owner);
-    rows.push([club ? club.name : p.owner || "", p.name || "", p.alumni || "", p.phone || ""]);
+function exportWonCSV(){
+  const won=(state.players||[]).filter(p=>p.status==="won");
+  const rows=[["Club","Player Name","Alumni","Phone"]];
+  won.forEach(p=>{
+    const club=(state.clubs||[]).find(c=>c.slug===p.owner);
+    rows.push([club?club.name:(p.owner||""), p.name||"", p.alumni||"", p.phone||""]);
   });
-  const csv = rows
-    .map((r) =>
-      r
-        .map((v) => {
-          const s = String(v ?? "");
-          return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-        })
-        .join(",")
-    )
-    .join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "auction-won-contacts.csv";
-  document.body.appendChild(a);
-  a.click();
-  URL.revokeObjectURL(url);
-  a.remove();
+  const csv = rows.map(r=> r.map(v=> {
+    const s=String(v??""); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+  }).join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"}), url=URL.createObjectURL(blob);
+  const a=document.createElement("a"); a.href=url; a.download="auction-won-contacts.csv"; document.body.appendChild(a); a.click();
+  URL.revokeObjectURL(url); a.remove();
 }
-function wireExportButton() {
-  const btn = $("btn-export");
-  if (!btn) return;
-  btn.onclick = null;
-  btn.addEventListener("click", exportWonCSV);
-}
+function wireExportButton(){ const btn=$("btn-export"); if(!btn) return; btn.onclick=null; btn.addEventListener("click", exportWonCSV); }
 
-/* ===========================
-   Create Club UI
-=========================== */
-function wireCreateClubUI() {
-  const nameEl = $("clubName"),
-    logoEl = $("clubLogo"),
-    budEl = $("clubBudget");
-  const btn = $("btnCreateClub"),
-    msg = $("clubCreateMsg");
-  if (!btn) return;
-  btn.onclick = null;
-  btn.addEventListener("click", async () => {
-    try {
-      if (msg) msg.textContent = "";
-      const name = (nameEl?.value || "").trim();
-      const logo = (logoEl?.value || "").trim();
-      const start = toNum(budEl?.value, state.totalPoints || 15000);
-      if (!name) throw new Error("Enter club name");
-      await addClubLocal({ name, logo_url: logo, starting_budget: start });
-      if (msg) msg.textContent = "Club created.";
-      renderOtherClubsPanel();
-    } catch (e) {
-      if (msg) msg.textContent = e.message || "Create failed.";
-    }
+/* ============= Settings UI (per-club preselected) ============= */
+function renderClubPreselectedPanel(){
+  const root=$("clubPreselectedPanel"); if(!root) return;
+  const clubs=state.clubs||[];
+  const lines = clubs.map(c=>{
+    const val = Object.entries(state.preselectedByClub?.[c.slug]||{}).map(([n,v])=>`${n}=${v}`).join("; ");
+    return `
+      <div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+        <label style="flex:0 0 220px;"><b>${c.name}</b></label>
+        <label style="flex:1;">Preselected (Name=Price; Name2=Price)
+          <input id="pre_${c.slug}" value="${val}" placeholder="e.g. John WK=1200; Anil=900" />
+        </label>
+      </div>`;
+  }).join("");
+  root.innerHTML = lines || `<div class="hint">Clubs will appear here.</div>`;
+}
+function collectClubPreselectedFromUI(){
+  const out={}; (state.clubs||[]).forEach(c=>{
+    const el=$(`pre_${c.slug}`); const txt = el ? el.value : "";
+    out[c.slug] = parsePreselectedText(txt, 0);
   });
-}
-
-/* ===========================
-   Start Bid (typeahead)
-=========================== */
-function wireStartBidUI() {
-  const input = $("startName"),
-    menu = $("startResults"),
-    btn = $("btn-start-bid"),
-    seed = $("seedBase");
-  if (!input || !menu || !btn) return;
-
-  function candidates(q) {
-    q = (q || "").trim().toLowerCase();
-    if (q.length < 2) return [];
-    return (state.players || [])
-      .filter((p) => p.status !== "won")
-      .filter((p) => (p.name || "").toLowerCase().includes(q) || (p.alumni || "").toLowerCase().includes(q))
-      .slice(0, 10);
-  }
-
-  input.addEventListener("input", () => {
-    const list = candidates(input.value);
-    if (!list.length) {
-      menu.style.display = "none";
-      menu.innerHTML = "";
-      return;
-    }
-    menu.style.display = "block";
-    menu.innerHTML = list.map((p) => `<div class="ta-item" data-id="${p.id}">${p.name}${p.alumni ? " · " + p.alumni : ""}</div>`).join("");
-    $$(".ta-item", menu).forEach((el) => {
-      el.addEventListener("click", () => {
-        const id = el.getAttribute("data-id");
-        setActivePlayer(id);
-        menu.style.display = "none";
-        if (seed) {
-          const player = state.players.find((x) => x.id === id);
-          let base = Number.isFinite(player?.base) ? player.base : null;
-          if (base == null && player?.category) {
-            const cat = String(player.category).trim();
-            const map = state.categoryBase;
-            const byName =
-              /1/i.test(cat) ? map.c1 : /2/i.test(cat) ? map.c2 : /3/i.test(cat) ? map.c3 : /4/i.test(cat) ? map.c4 : /5/i.test(cat) ? map.c5 : null;
-            base = Number.isFinite(byName) ? byName : null;
-          }
-          seed.value = Number.isFinite(base) ? base : "";
-        }
-      });
-    });
-  });
-
-  btn.addEventListener("click", () => {
-    const q = (input.value || "").trim().toLowerCase();
-    if (!q) return;
-    const rem = (state.players || []).filter((p) => p.status !== "won");
-    const exact =
-      rem.find((p) => (p.name || "").toLowerCase() === q || ((p.name || "") + " " + (p.alumni || "")).toLowerCase() === q) ||
-      rem.find((p) => (p.name || "").toLowerCase().startsWith(q));
-    if (exact) {
-      setActivePlayer(exact.id);
-      if (seed) {
-        let base = Number.isFinite(exact.base) ? exact.base : null;
-        if (base == null && exact.category) {
-          const map = state.categoryBase;
-          const cat = String(exact.category).trim();
-          const byName =
-            /1/i.test(cat) ? map.c1 : /2/i.test(cat) ? map.c2 : /3/i.test(cat) ? map.c3 : /4/i.test(cat) ? map.c4 : /5/i.test(cat) ? map.c5 : null;
-          base = Number.isFinite(byName) ? byName : null;
-        }
-        seed.value = Number.isFinite(base) ? base : "";
-      }
-    }
-  });
-}
-
-/* ===========================
-   Login + Settings
-=========================== */
-function wireLoginUI() {
-  const view = $("loginView");
-  const btn = $("btn-login");
-  const u = $("loginUser");
-  const p = $("loginPass");
-  const err = $("loginError");
-  if (!view || !btn) return;
-
-  show(view, !state.auth.loggedIn);
-  show($("settingsView"), false);
-  show($("appMain"), state.auth.loggedIn);
-
-  btn.onclick = null;
-  btn.addEventListener("click", async (ev) => {
-    try {
-      ev.preventDefault();
-      const user = (u?.value || "").trim();
-      const pass = p?.value || "";
-      if (user.toLowerCase() !== "hrb" || pass !== "sandeep") {
-        if (err) err.textContent = "Invalid credentials.";
-        return;
-      }
-
-      state.auth.loggedIn = true;
-      state.auth.user = "HRB";
-      await ensureMyClubSeeded();
-      persist();
-
-      show(view, false);
-      show($("appMain"), false);
-      show($("settingsView"), true);
-
-      $("cfgPlayersCap") && ($("cfgPlayersCap").value = state.playersNeeded);
-      $("cfgTotalPoints") && ($("cfgTotalPoints").value = state.totalPoints);
-      $("cfgGuardMin") && ($("cfgGuardMin").value = state.minBasePerPlayer || 250);
-      console.info("[HRB] login OK → settingsView shown");
-    } catch (e) {
-      console.error(e);
-      if (err) err.textContent = "Login error. See console.";
-    }
-  });
-}
-
-function parsePreselectedText(txt, fallbackSingleBid) {
-  const out = {};
-  const raw = String(txt || "").trim();
-  if (!raw) return out;
-  if (raw.includes("=")) {
-    raw.split(";").forEach((part) => {
-      const s = part.trim();
-      if (!s) return;
-      const [name, val] = s.split("=").map((x) => x.trim());
-      if (name) out[name.toLowerCase()] = toNum(val, 0);
-    });
-  } else {
-    out[raw.toLowerCase()] = toNum(fallbackSingleBid, 0);
-  }
   return out;
 }
 
-function applyPreselectedToRoster() {
-  const map = state.preselectedMap || {};
-  const names = Object.keys(map);
-  if (!names.length) return;
-
-  const c = myClub();
-  if (!c) return;
-
-  (state.players || []).forEach((p) => {
-    const key = (p.name || "").toLowerCase();
-    if (!map[key]) return;
-    if (p.status === "won" && p.owner === state.myClubSlug) return;
-    p.status = "won";
-    p.owner = state.myClubSlug;
-    p.finalBid = toNum(map[key], 0);
+/* ============= Login + Settings ============= */
+function wireLoginUI(){
+  const view=$("loginView"), btn=$("btn-login"), u=$("loginUser"), p=$("loginPass"), err=$("loginError");
+  if (!view || !btn) return;
+  show(view, !state.auth.loggedIn); show($("settingsView"), false); show($("appMain"), state.auth.loggedIn);
+  btn.onclick=null; btn.addEventListener("click", (ev)=>{
+    try{
+      ev.preventDefault();
+      const user=(u?.value||"").trim(); const pass=p?.value||"";
+      if (user.toLowerCase()!=="hrb" || pass!=="sandeep"){ if(err) err.textContent="Invalid credentials."; return; }
+      state.auth.loggedIn=true; state.auth.user="HRB";
+      ensureDefaultClubsSeeded(); persist();
+      show(view,false); show($("appMain"),false); show($("settingsView"),true);
+      $("cfgPlayersCap") && ($("cfgPlayersCap").value = state.playersNeeded);
+      $("cfgTotalPoints") && ($("cfgTotalPoints").value = state.totalPoints);
+      $("cfgGuardMin") && ($("cfgGuardMin").value = state.minBasePerPlayer || DEFAULT_MIN_BASE);
+      renderClubPreselectedPanel();
+    }catch(e){ console.error(e); if(err) err.textContent="Login error. See console."; }
   });
-
-  const spentExisting = (state.players || [])
-    .filter((p) => p.owner === state.myClubSlug && p.status === "won")
-    .reduce((s, p) => s + toNum(p.finalBid, 0), 0);
-  c.budget_left = Math.max(0, toNum(c.starting_budget, 0) - spentExisting);
-
-  persist();
 }
-
-function recomputeAvailableScorePreview() {
-  const total = toNum($("cfgTotalPoints")?.value, state.totalPoints || 15000);
-  const pre = parsePreselectedText($("cfgPreName")?.value, toNum($("cfgPreBid")?.value, 0));
-  const preSum = Object.values(pre).reduce((s, v) => s + toNum(v, 0), 0);
+function recomputeAvailableScorePreview(){
+  const total = toNum($("cfgTotalPoints")?.value, state.totalPoints||DEFAULT_TOTAL_POINTS);
+  const hrbMap = parsePreselectedText($("cfgPreName")?.value, toNum($("cfgPreBid")?.value, 0));
+  const preSum = Object.values(hrbMap).reduce((s,v)=>s+toNum(v,0),0);
   const out = Math.max(0, total - preSum);
   if ($("cfgAvailableScore")) $("cfgAvailableScore").textContent = out;
 }
-
-function wireSettingsUI() {
-  const view = $("settingsView");
-  if (!view) return;
-
-  ["cfgTotalPoints", "cfgPreName", "cfgPreBid"].forEach((id) => {
-    const el = $(id);
-    if (el) el.addEventListener("input", recomputeAvailableScorePreview);
-  });
+function wireSettingsUI(){
+  const view=$("settingsView"); if(!view) return;
+  ["cfgTotalPoints","cfgPreName","cfgPreBid"].forEach(id=>{ const el=$(id); if(el) el.addEventListener("input", recomputeAvailableScorePreview); });
   recomputeAvailableScorePreview();
-
-  const btn = $("btn-save-settings");
-  const err = $("settingsError");
-  btn.onclick = null;
-  btn.addEventListener("click", async () => {
-    try {
-      if (err) err.textContent = "";
-
-      const playersCap = toNum($("cfgPlayersCap")?.value, 15);
-      const totalPts = toNum($("cfgTotalPoints")?.value, 15000);
-
-      const c1 = toNum($("cfgBaseC1")?.value, NaN);
-      const c2 = toNum($("cfgBaseC2")?.value, NaN);
-      const c3 = toNum($("cfgBaseC3")?.value, NaN);
-      const c4 = toNum($("cfgBaseC4")?.value, NaN);
-      const c5 = toNum($("cfgBaseC5")?.value, NaN);
-
-      const guardMin = toNum($("cfgGuardMin")?.value, Number.isFinite(c5) ? c5 : state.minBasePerPlayer || 250);
-
-      const preMap = parsePreselectedText($("cfgPreName")?.value, toNum($("cfgPreBid")?.value, 0));
-
-      state.playersNeeded = playersCap;
-      state.totalPoints = totalPts;
-      state.minBasePerPlayer = guardMin;
-      state.categoryBase = {
-        c1: Number.isFinite(c1) ? c1 : null,
-        c2: Number.isFinite(c2) ? c2 : null,
-        c3: Number.isFinite(c3) ? c3 : null,
-        c4: Number.isFinite(c4) ? c4 : null,
-        c5: Number.isFinite(c5) ? c5 : null,
-      };
-      state.preselectedMap = preMap;
-
-      await ensureMyClubSeeded();
-
-      const c = myClub();
-      if (c) {
-        c.starting_budget = totalPts;
-        applyPreselectedToRoster();
-      }
-
+  const btn=$("btn-save-settings"), err=$("settingsError");
+  btn.onclick=null; btn.addEventListener("click", ()=>{
+    try{
+      if (err) err.textContent="";
+      state.playersNeeded = toNum($("cfgPlayersCap")?.value, DEFAULT_PLAYERS_CAP);
+      state.totalPoints = toNum($("cfgTotalPoints")?.value, DEFAULT_TOTAL_POINTS);
+      state.minBasePerPlayer = toNum($("cfgGuardMin")?.value, DEFAULT_MIN_BASE);
+      ensureDefaultClubsSeeded();
+      state.preselectedByClub = collectClubPreselectedFromUI();
+      state.preselectedMap = parsePreselectedText($("cfgPreName")?.value, toNum($("cfgPreBid")?.value, 0));
+      applyPreselectedAllClubs();
       persist();
-
-      show(view, false);
-      show($("appMain"), true);
-      render();
-      $("appMain").scrollIntoView({ behavior: "smooth", block: "start" });
-    } catch (e) {
-      console.error(e);
-      if (err) err.textContent = "Failed to save settings. Check console.";
-    }
+      show(view,false); show($("appMain"),true); render(); $("appMain").scrollIntoView({behavior:"smooth", block:"start"});
+    }catch(e){ console.error(e); if(err) err.textContent="Failed to save settings. Check console."; }
   });
 }
 
-/* ===========================
-   Top control inputs + buttons
-=========================== */
-function wireTopControls() {
-  const tot = $("totalPoints");
-  const cap = $("playersNeeded");
-  const min = $("minBasePerPlayer");
-  const btnShuffle = $("btn-shuffle");
-  const btnNext = $("btn-next");
-  const btnUndo = $("btn-undo");
-  const btnReset = $("btn-reset");
-  const btnLogout = $("btn-logout");
-
-  if (tot) {
-    tot.value = state.totalPoints;
-    tot.addEventListener("input", async () => {
-      state.totalPoints = toNum(tot.value, 15000);
-      await ensureMyClubSeeded();
-      persist();
-      render();
-    });
+/* ============= Start Bid (typeahead) ============= */
+function wireStartBidUI(){
+  const input=$("startName"), menu=$("startResults"), btn=$("btn-start-bid"), seed=$("seedBase");
+  if (!input || !menu || !btn) return;
+  function candidates(q){
+    q=(q||"").trim().toLowerCase(); if(q.length<2) return [];
+    return (state.players||[]).filter(p=>p.status!=="won")
+      .filter(p=> (p.name||"").toLowerCase().includes(q) || (p.alumni||"").toLowerCase().includes(q)).slice(0,10);
   }
-  if (cap) {
-    cap.value = state.playersNeeded;
-    cap.addEventListener("input", () => {
-      state.playersNeeded = toNum(cap.value, 15);
-      persist();
-      render();
+  input.addEventListener("input", ()=>{
+    const list=candidates(input.value);
+    if (!list.length){ menu.style.display="none"; menu.innerHTML=""; return; }
+    menu.style.display="block";
+    menu.innerHTML = list.map(p=>`<div class="ta-item" data-id="${p.id}">${p.name}${p.alumni?" · "+p.alumni:""}</div>`).join("");
+    $$(".ta-item", menu).forEach(el=>{
+      el.addEventListener("click", ()=>{
+        const id=el.getAttribute("data-id"); setActivePlayer(id); menu.style.display="none";
+        if (seed){ const player=state.players.find(x=>x.id===id); seed.value = Number.isFinite(player?.base) ? player.base : ""; }
+      });
     });
-  }
-  if (min) {
-    min.value = state.minBasePerPlayer || 250;
-    min.addEventListener("input", () => {
-      state.minBasePerPlayer = toNum(min.value, 250);
-      persist();
-      render();
-    });
-  }
+  });
+  btn.addEventListener("click", ()=>{
+    const q=(input.value||"").trim().toLowerCase(); if(!q) return;
+    const rem=(state.players||[]).filter(p=>p.status!=="won");
+    const exact = rem.find(p=>(p.name||"").toLowerCase()===q || (((p.name||"")+" "+(p.alumni||"")).toLowerCase()===q)) ||
+                  rem.find(p=>(p.name||"").toLowerCase().startsWith(q));
+    if (exact){ setActivePlayer(exact.id); if (seed){ seed.value = Number.isFinite(exact.base) ? exact.base : ""; } }
+  });
+}
 
-  if (btnShuffle)
-    btnShuffle.addEventListener("click", () => {
-      const rem = (state.players || []).filter((p) => p.status !== "won");
-      for (let i = rem.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [rem[i], rem[j]] = [rem[j], rem[i]];
-      }
-      const first = rem[0];
-      if (first) setActivePlayer(first.id);
-    });
-
-  if (btnNext)
-    btnNext.addEventListener("click", () => {
-      const rem = (state.players || []).filter((p) => p.status !== "won");
-      if (!rem.length) return;
-      const idx = rem.findIndex((x) => x.id === state.activePlayerId);
-      const next = idx >= 0 ? rem[(idx + 1) % rem.length] : rem[0];
-      setActivePlayer(next.id);
-    });
-
-  if (btnUndo)
-    btnUndo.addEventListener("click", () => {
-      const hrbWins = (state.players || [])
-        .filter((p) => p.owner === state.myClubSlug && p.status === "won")
-        .sort((a, b) => (b.finalBidTs || 0) - (a.finalBidTs || 0));
-      const last = hrbWins[0];
-      if (!last) return;
-      const c = myClub();
-      if (c) {
-        c.budget_left = Math.max(0, toNum(c.budget_left, 0) + toNum(last.finalBid, 0));
-      }
-      last.status = "new";
-      last.owner = null;
-      last.finalBid = null;
-      persist();
-      render();
-    });
-
-  if (btnReset)
-    btnReset.addEventListener("click", () => {
-      if (!confirm("Clear local session (players, clubs, settings)?")) return;
+/* ============= Top controls (logout/reset/export) ============= */
+function wireTopControls(){
+  const btnLogout=$("btn-logout"), btnReset=$("btn-reset");
+  if (btnLogout){
+    btnLogout.onclick=null; btnLogout.addEventListener("click", ()=>{
       localStorage.removeItem("hrb-auction-state");
-      location.reload();
-    });
-
-  if (btnLogout) {
-    show(btnLogout, true);
-    btnLogout.onclick = null;
-    btnLogout.addEventListener("click", async () => {
-      await fullReset(); // resets state + budgets to defaults
-      persist();
-      show($("appMain"), false);
-      show($("settingsView"), false);
-      show($("loginView"), true);
+      state = factoryState();
+      ensureDefaultClubsSeeded(); persist();
+      show($("appMain"), false); show($("settingsView"), false); show($("loginView"), true);
       $("loginUser")?.focus();
-      console.info("[HRB] full reset → loginView shown");
+    });
+  }
+  if (btnReset){
+    btnReset.onclick=null; btnReset.addEventListener("click", ()=>{
+      if (!confirm("Clear local session (players, clubs, settings)?")) return;
+      localStorage.removeItem("hrb-auction-state"); location.reload();
     });
   }
 }
 
-/* ===========================
-   Boot
-=========================== */
-async function boot() {
+/* ============= Boot ============= */
+function boot(){
   window.__diag && __diag("boot() start");
-  load();
-  await ensureMyClubSeeded();
-  wireLoginUI();
-  wireSettingsUI();
-  wireCreateClubUI();
-  wireCsvImportUI();
-  wireStartBidUI();
-  wireExportButton();
-  wireTopControls();
-  if (state.auth.loggedIn) {
-    show($("loginView"), false);
-    show($("settingsView"), false);
-    show($("appMain"), true);
-  }
+  load(); ensureDefaultClubsSeeded();
+  wireLoginUI(); wireSettingsUI(); wireCsvImportUI(); wireStartBidUI(); wireExportButton(); wireTopControls();
   render();
+  if (state.auth.loggedIn){ show($("loginView"),false); show($("settingsView"),false); show($("appMain"),true); }
   window.__diag && __diag("boot() done");
 }
 document.addEventListener("DOMContentLoaded", boot);
 
-/* ===========================
-   Failsafe visibility
-=========================== */
-(function ensureVisible() {
-  const login = document.getElementById("loginView");
-  const settings = document.getElementById("settingsView");
-  const app = document.getElementById("appMain");
-  const allHidden = [login, settings, app].every((el) => !el || getComputedStyle(el).display === "none");
-  if (allHidden) {
-    let st = {};
-    try {
-      st = JSON.parse(localStorage.getItem("hrb-auction-state") || "{}");
-    } catch {}
-    const loggedIn = !!(st.auth && st.auth.loggedIn);
-    if (login) login.style.display = loggedIn ? "none" : "block";
-    if (settings) settings.style.display = loggedIn ? "block" : "none";
-    if (app) app.style.display = loggedIn ? "block" : "none";
+/* ============= Failsafe visibility ============= */
+(function ensureVisible(){
+  const login=$("loginView"), settings=$("settingsView"), app=$("appMain");
+  const allHidden=[login,settings,app].every(el=>!el || getComputedStyle(el).display==="none");
+  if (allHidden){
+    let st={}; try{ st=JSON.parse(localStorage.getItem("hrb-auction-state")||"{}"); }catch{}
+    const logged=!!(st.auth&&st.auth.loggedIn);
+    if (login) login.style.display = logged ? "none" : "block";
+    if (settings) settings.style.display = logged ? "block" : "none";
+    if (app) app.style.display = logged ? "block" : "none";
     console.warn("[HRB] All views were hidden; applied failsafe.");
   }
 })();
