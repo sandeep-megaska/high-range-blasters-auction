@@ -1,5 +1,5 @@
-/* HRB Auction Assist – app.js (vanilla, no modules) */
-const APP_BUILD = "hrb-2025-11-02-INSIGHTS-v2";
+/* HRB Auction Assist – app.js (timer+round+undo) */
+const APP_BUILD = "hrb-2025-11-03-TIMER-ROUND-UNDO";
 console.log("[HRB] build:", APP_BUILD);
 if (window.__HRB_APP_LOADED__) { throw new Error("DUP_LOAD"); }
 window.__HRB_APP_LOADED__ = true;
@@ -21,7 +21,7 @@ const PI_WEIGHTS = {
   eco_rate: 0.45
 };
 
-/* 8 fixed clubs (hard-coded names) */
+/* 8 fixed clubs */
 const DEFAULT_CLUBS = [
   { name: "High Range Blasters", slug: "high-range-blasters", logo_url: "" },
   { name: "Black Panthers", slug: "black-panthers", logo_url: "" },
@@ -45,6 +45,11 @@ let state = {
   myClubSlug: "high-range-blasters",
   clubs: [],
   activePlayerId: null,
+  // NEW: round + timer
+  roundNo: 1,
+  timer: { duration: 45, remaining: 45, running: false },
+  // NEW: history for undo
+  history: []
 };
 
 function persist(){ try{ localStorage.setItem("hrb-auction-state", JSON.stringify(state)); }catch{} }
@@ -62,10 +67,10 @@ function show(el,on=true){ if(!el) return; el.style.display = on?"block":"none";
 function availabilityIsBothDays(av){
   const s = String(av||"").trim(); if(!s) return false;
   if (/(both\s*days|two\s*days|day\s*1\s*and\s*day\s*2|sat\s*&\s*sun|saturday.*sunday)/i.test(s)) return true;
-  const dateLike = s.match(/(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[^0-9]{0,5}\d{1,2}/gi);
+  const dateLike = s.match(/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[^0-9]{0,5}\d{1,2}/gi);
   if (dateLike && dateLike.length>=2) return true;
   const tokens = s.split(/[^a-z0-9]+/i).filter(Boolean);
-  const hasMonth = tokens.some(t=>/(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)/i.test(t));
+  const hasMonth = tokens.some(t=>/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(t));
   const dayNums = tokens.filter(t=>/^\d{1,2}$/.test(t));
   if (hasMonth && dayNums.length>=2) return true;
   return false;
@@ -146,7 +151,6 @@ function maxYouCanSpendNow(){
   return Math.max(minBase(), bud - floor);
 }
 function marketPulse(){
-  // role scarcity + availability + category scarcity
   const rem=(state.players||[]).filter(p=>p.status!=="won");
   const count = (list, pred)=>list.filter(pred).length;
   const bowlers = count(rem, p=>/bowl/i.test(String(p.skill||""))||/all/i.test(String(p.skill||"")));
@@ -163,7 +167,6 @@ function marketPulse(){
   return { total: rem.length, bowlers, wks, lefties, bothDays, cats };
 }
 function threatClubs(){
-  // clubs with highest budget/slot left
   return (state.clubs||[]).map(c=>{
     const players=(state.players||[]).filter(p=>p.owner===c.slug&&p.status==="won").length;
     const slots=Math.max(0,(state.playersNeeded||DEFAULT_PLAYERS_CAP)-players);
@@ -172,7 +175,6 @@ function threatClubs(){
   }).sort((a,b)=>b.perSlot-a.perSlot).slice(0,3);
 }
 function winProbabilityHeuristic(p, bid){
-  // very simple signal: your bid relative to (avg of top 3 clubs per-slot), weighted by player priority
   const top=threatClubs();
   const bench = top.reduce((s,c)=>s+c.perSlot,0)/(top.length||1);
   const prio = computeBidPriority(p)/120; // 0..1
@@ -345,6 +347,34 @@ function recomputeBudgetsFromWins(){
   });
 }
 
+/* ============= History (Undo) ============= */
+function pushHistory(tag){
+  try{
+    const snapshot = JSON.stringify({
+      tag: tag||"",
+      players: state.players,
+      clubs: state.clubs
+    });
+    state.history = state.history || [];
+    state.history.push(snapshot);
+    if(state.history.length>50) state.history.shift();
+    persist();
+  }catch(e){ console.warn("history push failed", e); }
+}
+function canUndo(){ return (state.history||[]).length>0; }
+function undo(){
+  if(!canUndo()) return;
+  const raw = state.history.pop();
+  try{
+    const snap = JSON.parse(raw||"{}");
+    state.players = JSON.parse(JSON.stringify(snap.players||[]));
+    state.clubs = JSON.parse(JSON.stringify(snap.clubs||[]));
+    recomputeBudgetsFromWins();
+    persist();
+    render();
+  }catch(e){ console.error("undo failed", e); }
+}
+
 /* ============= Live flow ============= */
 function setActivePlayer(id){ state.activePlayerId=id||null; persist(); renderLiveBid(); }
 function getActivePlayer(){ return (state.players||[]).find(p=>p.id===state.activePlayerId)||null; }
@@ -354,6 +384,7 @@ function markWon(playerId, price){
   const bid=Number(price);
   if(!Number.isFinite(bid) || bid<minBase()){ alert("Please enter a valid bid ≥ "+minBase()+"."); return; }
   if(!guardrailOK(bid)){ alert("Guardrail violated. Reduce bid."); return; }
+  pushHistory("markWon");
   p.status="won"; p.finalBid=bid; p.owner=state.myClubSlug;
   recomputeBudgetsFromWins(); persist(); render();
 }
@@ -365,6 +396,7 @@ function assignToClubByNameOrSlug(playerId, clubText, price){
   const p=(state.players||[]).find(x=>x.id===playerId); if(!p) return;
   const bid=Number(price); const min=minBase();
   if(!Number.isFinite(bid) || bid<min){ if(msg) msg.textContent="Enter a valid final bid ≥ "+min+"."; return; }
+  pushHistory("assignToClub");
   p.status="won"; p.finalBid=bid; p.owner=club.slug;
   recomputeBudgetsFromWins(); persist(); render();
 }
@@ -372,9 +404,11 @@ function assignToClubByNameOrSlug(playerId, clubText, price){
 /* ============= UI helpers ============= */
 function miniRow(p){
   const alumni=p.alumni||"", phone=p.phone||"", sep=alumni&&phone?" · ":"";
+  const price = (p.status==="won" && Number.isFinite(toNum(p.finalBid,null))) ? ` <span style="background:#111827;color:#fff;padding:2px 6px;border-radius:6px;margin-left:6px;">${toNum(p.finalBid,0)} pts</span>` : "";
+  const owner = p.owner ? ` <span class="hint" style="margin-left:6px;">(${(state.clubs||[]).find(c=>c.slug===p.owner)?.name||p.owner})</span>` : "";
   return `
   <div class="mini-row" style="padding:6px 0;border-bottom:1px solid #eef1f4">
-    <div style="font-size:14px;font-weight:700">${p.name||"-"}</div>
+    <div style="font-size:14px;font-weight:700">${p.name||"-"}${price}${owner}</div>
     <div style="font-size:12px;color:#6b7280">${alumni}${sep}${phone}</div>
   </div>`;
 }
@@ -492,13 +526,7 @@ function renderLiveBid(){
   bidEl.addEventListener("input", ()=>{ validate(); renderInsights(p, Number(bidEl.value)||null); });
   validate();
   wonBtn.addEventListener("click", ()=>{ if(!validate()) return; markWon(p.id, Number(bidEl.value)); });
-  $("btn-pass")?.addEventListener("click", ()=>{
-    const panel=$("passPanel"); if(!panel) return;
-    panel.style.display="block"; panel.scrollIntoView({behavior:"smooth", block:"center"});
-    wirePassPanelForPlayer(p);
-  });
-
-  // Insights initial render
+  $("btn-pass")?.addEventListener("click", ()=>{ const panel=$("passPanel"); if(!panel) return; panel.style.display="block"; panel.scrollIntoView({behavior:"smooth", block:"center"}); wirePassPanelForPlayer(p); });
   renderInsights(p, Number(bidEl.value)||null);
 }
 
@@ -507,6 +535,10 @@ function updateHeaderStats(){
   if($("remainingPoints")) $("remainingPoints").textContent=remainingPts;
   if($("remainingSlots")) $("remainingSlots").textContent=remSlots;
   if(guardEl) guardEl.innerHTML = `Guardrail (min per slot): <b>${minBase()}</b>`;
+  // NEW: update round + timer display
+  if($("roundNo")) $("roundNo").textContent = state.roundNo || 1;
+  if($("timerDisplay")) $("timerDisplay").textContent = formatSeconds(state.timer?.remaining ?? 45);
+  if($("btn-undo")) $("btn-undo").disabled = !canUndo();
 }
 
 function render(){ renderPlayersList(); renderOtherClubsPanel(); renderLiveBid(); renderSelectedSquad(); renderComplianceBar(); updateHeaderStats(); }
@@ -569,17 +601,49 @@ function downloadTemplateCSV(){
   downloadCSV([headers], "HRB_Auction_Master_Template.csv");
 }
 
+/* ============= Timer + Round ============= */
+let _timerHandle = null;
+function formatSeconds(s){ s=Math.max(0,Math.floor(s||0)); const m=Math.floor(s/60); const r=s%60; return `${String(m).padStart(2,'0')}:${String(r).padStart(2,'0')}`; }
+function startTimer(){
+  if(state.timer.running) return;
+  state.timer.running = true;
+  persist();
+  if(_timerHandle) clearInterval(_timerHandle);
+  _timerHandle = setInterval(()=>{
+    state.timer.remaining = Math.max(0, (state.timer.remaining||0) - 1);
+    if($("timerDisplay")) $("timerDisplay").textContent = formatSeconds(state.timer.remaining);
+    if(state.timer.remaining<=0){ pauseTimer(); }
+  }, 1000);
+  updateHeaderStats();
+}
+function pauseTimer(){
+  state.timer.running = false;
+  if(_timerHandle) clearInterval(_timerHandle);
+  _timerHandle=null; persist(); updateHeaderStats();
+}
+function resetTimer(){
+  state.timer.remaining = state.timer.duration || 45;
+  persist(); updateHeaderStats();
+}
+function nextRound(){
+  state.roundNo = (state.roundNo||1) + 1;
+  resetTimer();
+  persist(); updateHeaderStats();
+}
+function wireTimerUI(){
+  $("btn-timer-start")?.addEventListener("click", startTimer);
+  $("btn-timer-pause")?.addEventListener("click", pauseTimer);
+  $("btn-timer-reset")?.addEventListener("click", resetTimer);
+  $("btn-next-round")?.addEventListener("click", nextRound);
+}
+
 /* ============= Settings & Startup ============= */
 function recomputeAvailableScorePreview(){
   const total=toNum($("cfgTotalPoints")?.value, state.totalPoints||DEFAULT_TOTAL_POINTS);
   const hrbMap={};
   const preTxt=$("cfgPreName")?.value||"";
   if(preTxt.includes("=")){
-    preTxt.split(";").forEach(s=>{
-      s=s.trim(); if(!s) return;
-      const [n,v]=s.split("=").map(x=>x.trim());
-      if(n) hrbMap[n.toLowerCase()]=toNum(v,0);
-    });
+    preTxt.split(";").forEach(s=>{ s=s.trim(); if(!s) return; const [n,v]=s.split("=").map(x=>x.trim()); if(n) hrbMap[n.toLowerCase()]=toNum(v,0); });
   }
   const preSum=Object.values(hrbMap).reduce((s,v)=>s+toNum(v,0),0);
   const out=Math.max(0,total-preSum);
@@ -605,11 +669,7 @@ function collectClubPreselectedFromUI(){
   const out={}; (state.clubs||[]).forEach(c=>{
     const el=$("pre_"+c.slug); const txt=el?el.value:""; const map={};
     if(String(txt||"").includes("=")){
-      txt.split(";").forEach(s=>{
-        s=s.trim(); if(!s) return;
-        const [n,v]=s.split("=").map(x=>x.trim());
-        if(n) map[n.toLowerCase()]=toNum(v,0);
-      });
+      txt.split(";").forEach(s=>{ s=s.trim(); if(!s) return; const [n,v]=s.split("=").map(x=>x.trim()); if(n) map[n.toLowerCase()]=toNum(v,0); });
     }
     out[c.slug]=map;
   });
@@ -661,6 +721,7 @@ function wireCsvImportUI(){
 function wireExportButton(){
   const wonBtn=$("btn-export"); if(wonBtn){ wonBtn.onclick=null; wonBtn.addEventListener("click", exportWonCSV); }
   const allBtn=$("btn-export-state"); if(allBtn){ allBtn.onclick=null; allBtn.addEventListener("click", exportAllStateCSV); }
+  const undoBtn=$("btn-undo"); if(undoBtn){ undoBtn.onclick=null; undoBtn.addEventListener("click", undo); }
 }
 
 function wireStartBidUI(){
@@ -725,7 +786,6 @@ function wireSettingsUI(){
     state.totalPoints = toNum(totalPts?.value, DEFAULT_TOTAL_POINTS);
     state.minBasePerPlayer = toNum(guardMin?.value, DEFAULT_MIN_BASE);
 
-    // HRB preselected (optional)
     const my = {};
     const text=(preTxt?.value||"").trim();
     if(text.includes("=")){
@@ -737,17 +797,14 @@ function wireSettingsUI(){
     } else if (text && preSingle?.value){
       my[text.toLowerCase()] = toNum(preSingle.value,0);
     }
-    // Other clubs preselected
     state.preselectedByClub = collectClubPreselectedFromUI();
 
-    // apply preselected to budget (all clubs)
     ensureDefaultClubsSeeded();
     (state.clubs||[]).forEach(c=>{
       const map = (c.slug===state.myClubSlug) ? my : (state.preselectedByClub?.[c.slug]||{});
       const sum = Object.values(map).reduce((s,v)=>s+toNum(v,0),0);
       c.starting_budget = state.totalPoints;
       c.budget_left = Math.max(0, c.starting_budget - sum);
-      // also mark players as won if found in sheet
       Object.keys(map).forEach(nameLC=>{
         const player=(state.players||[]).find(pp=> (pp.name||"").toLowerCase()===nameLC);
         if(player && player.status!=="won"){
@@ -765,7 +822,6 @@ function wireSettingsUI(){
 function wireLogout(){
   const btn=$("btn-logout"); if(!btn) return;
   btn.onclick=null; btn.addEventListener("click", ()=>{
-    // Full reset to initial (fresh auction)
     state = {
       players: [],
       auth: { loggedIn: false, user: null },
@@ -777,6 +833,9 @@ function wireLogout(){
       myClubSlug: "high-range-blasters",
       clubs: [],
       activePlayerId: null,
+      roundNo: 1,
+      timer: { duration: 45, remaining: 45, running: false },
+      history: []
     };
     localStorage.removeItem("hrb-auction-state");
     persist();
@@ -789,7 +848,6 @@ function boot(){
   load();
   ensureDefaultClubsSeeded();
 
-  // Initial view routing
   show($("loginView"), !state.auth.loggedIn);
   show($("settingsView"), state.auth.loggedIn && (state.players||[]).length===0);
   show($("appMain"), state.auth.loggedIn && (state.players||[]).length>0);
@@ -800,22 +858,10 @@ function boot(){
   wireExportButton();
   wireStartBidUI();
   wireLogout();
+  wireTimerUI();
 
-  // Failsafe: if all hidden, decide by auth
-  (function ensureVisible() {
-    const login = document.getElementById('loginView');
-    const settings = document.getElementById('settingsView');
-    const app = document.getElementById('appMain');
-    const allHidden = [login, settings, app].every(el => !el || getComputedStyle(el).display === 'none');
-    if (allHidden) {
-      const st = JSON.parse(localStorage.getItem('hrb-auction-state')||'{}');
-      const loggedIn = !!(st.auth && st.auth.loggedIn);
-      if (login) login.style.display = loggedIn ? 'none' : '';
-      if (settings) settings.style.display = loggedIn ? ( (st.players||[]).length? 'none' : '' ) : 'none';
-      if (app) app.style.display = loggedIn ? ( (st.players||[]).length? '' : 'none' ) : 'none';
-      console.warn('[hrb] All views were hidden; applied failsafe.');
-    }
-  })();
+  // Keep timer UI in sync if already running
+  if(state.timer?.running){ startTimer(); }
 
   if (state.auth.loggedIn && (state.players||[]).length>0) render();
   console.log("boot()");
