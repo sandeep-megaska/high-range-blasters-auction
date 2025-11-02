@@ -930,27 +930,41 @@ function wireLoginUI() {
   const err = $("loginError");
   if (!view || !btn) return;
 
-  // show login if not logged in
+  // initial visibility
   show(view, !state.auth.loggedIn);
   show($("settingsView"), false);
   show($("appMain"), state.auth.loggedIn);
 
   btn.onclick = null;
-  btn.addEventListener("click", () => {
-    const user = (u?.value || "").trim();
-    const pass = p?.value || "";
-    if (user.toLowerCase() === "hrb" && pass === "sandeep") {
+  btn.addEventListener("click", async (ev) => {
+    try {
+      ev.preventDefault();
+      const user = (u?.value || "").trim();
+      const pass = p?.value || "";
+      if (user.toLowerCase() !== "hrb" || pass !== "sandeep") {
+        if (err) err.textContent = "Invalid credentials.";
+        return;
+      }
+
+      // set auth, seed HRB budget, persist
       state.auth.loggedIn = true;
       state.auth.user = "HRB";
+      await ensureMyClubSeeded();
       persist();
+
+      // navigate to SETTINGS first
       show(view, false);
-      show($("settingsView"), true);
       show($("appMain"), false);
-      $("cfgPlayersCap").value = state.playersNeeded;
-      $("cfgTotalPoints").value = state.totalPoints;
-      $("cfgGuardMin").value = state.minBasePerPlayer || 250;
-    } else {
-      if (err) err.textContent = "Invalid credentials.";
+      show($("settingsView"), true);
+
+      // prefill settings inputs
+      $("cfgPlayersCap") && ($("cfgPlayersCap").value = state.playersNeeded);
+      $("cfgTotalPoints") && ($("cfgTotalPoints").value = state.totalPoints);
+      $("cfgGuardMin")   && ($("cfgGuardMin").value   = state.minBasePerPlayer || 250);
+      console.info("[HRB] login OK → settingsView shown");
+    } catch (e) {
+      console.error(e);
+      if (err) err.textContent = "Login error. See console.";
     }
   });
 }
@@ -1178,15 +1192,18 @@ function wireTopControls() {
 
   if (btnLogout) {
   show(btnLogout, true);
+  btnLogout.onclick = null;
   btnLogout.addEventListener("click", async () => {
-    // FULL factory reset on logout
-    await fullReset();
-    // show login screen
+    await fullReset();                 // resets state + budgets to defaults
+    persist();
     show($("appMain"), false);
     show($("settingsView"), false);
     show($("loginView"), true);
     $("loginUser")?.focus();
+    console.info("[HRB] full reset → loginView shown");
   });
+}
+
 }
   }
 }
