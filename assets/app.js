@@ -51,6 +51,45 @@ let state = {
   // live bid
   activePlayerId: null,
 };
+// Factory state for a brand-new auction
+function factoryState() {
+  return {
+    players: [],
+    auth: { loggedIn: false, user: null },
+    playersNeeded: 15,
+    totalPoints: 15000,
+    minBasePerPlayer: 250,
+    categoryBase: { c1: null, c2: null, c3: null, c4: null, c5: null },
+    preselectedMap: {},
+    myClubSlug: "high-range-blasters",
+    clubs: [],          // will be seeded with HRB
+    activePlayerId: null,
+  };
+}
+
+// Hard reset everything (fresh boot)
+async function fullReset() {
+  localStorage.removeItem("hrb-auction-state");
+  state = factoryState();
+  await ensureMyClubSeeded();   // seeds HRB with starting & remaining = totalPoints
+  persist();
+}
+
+// Soft reset: keep players but clear wins & spend; reset budgets to totalPoints
+async function resetAuctionDataKeepPlayers() {
+  // reset player statuses
+  (state.players || []).forEach(p => {
+    p.status = "new";
+    p.owner = null;
+    p.finalBid = null;
+  });
+  // clear preselected map
+  state.preselectedMap = {};
+  // reset clubs to only HRB with fresh budget
+  state.clubs = [];
+  await ensureMyClubSeeded();
+  persist();
+}
 
 function persist() {
   try {
