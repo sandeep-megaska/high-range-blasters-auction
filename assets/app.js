@@ -20,7 +20,7 @@ window.__HRB_APP_LOADED__ = true;
 /* ============= Constants ============= */
 const DEFAULT_PLAYERS_CAP = 15;
 const DEFAULT_TOTAL_POINTS = 15000;
-const DEFAULT_MIN_BASE = 250;
+const DEFAULT_MIN_BASE = 200;
 const MUST_BID_RATING = 8;
 
 const DEFAULT_CLUBS = [
@@ -117,6 +117,10 @@ function availabilityIsBothDays(av) {
 
   // Otherwise treat as single-day (low availability)
   return false;
+}
+function minBase() {
+  // honor settings if set, else default to 200
+  return Number(state?.minBasePerPlayer) > 0 ? Number(state.minBasePerPlayer) : DEFAULT_MIN_BASE;
 }
 
 
@@ -293,8 +297,8 @@ function markWon(playerId, price) {
   const p = (state.players || []).find(x => x.id === playerId);
   if (!p) return;
   const bid = Number(price);
-  if (!Number.isFinite(bid) || bid <= 199) {
-    alert("Please enter a valid bid (> 200).");
+  if (!Number.isFinite(bid) || bid < minBase()) {
+    alert("Please enter a valid bid ≥ " + minBase() + ".");
     return;
   }
   if (!guardrailOK(bid)) {
@@ -320,11 +324,12 @@ function assignToClubByNameOrSlug(playerId, clubText, price) {
   const p = (state.players || []).find(x => x.id === playerId);
   if (!p) return;
 
-  const bid = Number(price);
-  if (!Number.isFinite(bid) || bid <= 0) {
-    if (msg) msg.textContent = "Enter a valid final bid (> 0).";
-    return;
-  }
+const bid = Number(price);
+const tournamentMin = minBase(); // enforce tournament minimum (200 or settings)
+if (!Number.isFinite(bid) || bid < tournamentMin) {
+  if (msg) msg.textContent = "Enter a valid final bid ≥ " + tournamentMin + ".";
+  return;
+}
 
   p.status = "won";
   p.finalBid = bid;
@@ -452,21 +457,18 @@ function renderLiveBid(){
  // inside renderLiveBid(), replace the existing validate() with this:
 const validate = () => {
   const raw = bidEl.value;
-  // invalid if empty, whitespace, NaN, or <= 0
   if (!raw || !String(raw).trim().length) {
-    warnEl.textContent = "Enter a bid (> 0).";
-    wonBtn.disabled = true;
-    return false;
+    warnEl.textContent = "Enter a bid (≥ " + minBase() + ").";
+    wonBtn.disabled = true; return false;
   }
   const price = Number(raw);
-  if (!Number.isFinite(price) || price <= 0) {
-    warnEl.textContent = "Enter a bid (> 0).";
-    wonBtn.disabled = true;
-    return false;
+  if (!Number.isFinite(price) || price < minBase()) {
+    warnEl.textContent = "Enter a bid (≥ " + minBase() + ").";
+    wonBtn.disabled = true; return false;
   }
   const ok = guardrailOK(price);
   wonBtn.disabled = !ok;
-  const floor = Math.max(0, (remainingSlots() - 1) * (state.minBasePerPlayer || DEFAULT_MIN_BASE));
+  const floor = Math.max(0, (remainingSlots() - 1) * minBase());
   warnEl.textContent = ok ? "" : `Guardrail: keep ≥ ${floor} for remaining slots.`;
   return ok;
 };
