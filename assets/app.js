@@ -405,10 +405,9 @@ function assignToClubByNameOrSlug(playerId, clubText, price){
 function miniRow(p){
   const alumni=p.alumni||"", phone=p.phone||"", sep=alumni&&phone?" · ":"";
   const price = (p.status==="won" && Number.isFinite(toNum(p.finalBid,null))) ? ` <span style="background:#111827;color:#fff;padding:2px 6px;border-radius:6px;margin-left:6px;">${toNum(p.finalBid,0)} pts</span>` : "";
-  const owner = p.owner ? ` <span class="hint" style="margin-left:6px;">(${(state.clubs||[]).find(c=>c.slug===p.owner)?.name||p.owner})</span>` : "";
   return `
   <div class="mini-row" style="padding:6px 0;border-bottom:1px solid #eef1f4">
-    <div style="font-size:14px;font-weight:700">${p.name||"-"}${price}${owner}</div>
+    <div style="font-size:14px;font-weight:700">${p.name||"-"}${price}</div>
     <div style="font-size:12px;color:#6b7280">${alumni}${sep}${phone}</div>
   </div>`;
 }
