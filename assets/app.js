@@ -1,5 +1,5 @@
 /* HRB Auction Assist – app.js (vanilla, no modules) */
-const APP_BUILD = "hrb-2025-11-02-19";
+const APP_BUILD = "hrb-2025-11-02-INSIGHTS-v2";
 console.log("[HRB] build:", APP_BUILD);
 if (window.__HRB_APP_LOADED__) { throw new Error("DUP_LOAD"); }
 window.__HRB_APP_LOADED__ = true;
@@ -133,7 +133,125 @@ function suggestedCap(p){
   return cap;
 }
 
-/* ============= CSV parsing ============= */
+/* ============= Predictive / Insights ============= */
+function guardrailOK(bid){
+  const rem=remainingSlots();
+  const floor=minBase();
+  const bud=remainingBudget(state.myClubSlug);
+  return bid<=bud && bud-bid>=(rem-1)*floor;
+}
+function maxYouCanSpendNow(){
+  const bud = remainingBudget(state.myClubSlug);
+  const floor = minBase() * Math.max(0, remainingSlots()-1);
+  return Math.max(minBase(), bud - floor);
+}
+function marketPulse(){
+  // role scarcity + availability + category scarcity
+  const rem=(state.players||[]).filter(p=>p.status!=="won");
+  const count = (list, pred)=>list.filter(pred).length;
+  const bowlers = count(rem, p=>/bowl/i.test(String(p.skill||""))||/all/i.test(String(p.skill||"")));
+  const wks = count(rem, p=>/wk/i.test(String(p.skill||"")));
+  const lefties = count(rem, p=>/left/i.test(String(p.batting_type||p.batting||"")));
+  const bothDays = count(rem, p=>availabilityIsBothDays(p.availability));
+  const cats = {
+    c1: count(rem, p=>toNum(p.category,null)===1),
+    c2: count(rem, p=>toNum(p.category,null)===2),
+    c3: count(rem, p=>toNum(p.category,null)===3),
+    c4: count(rem, p=>toNum(p.category,null)===4),
+    c5: count(rem, p=>toNum(p.category,null)===5)
+  };
+  return { total: rem.length, bowlers, wks, lefties, bothDays, cats };
+}
+function threatClubs(){
+  // clubs with highest budget/slot left
+  return (state.clubs||[]).map(c=>{
+    const players=(state.players||[]).filter(p=>p.owner===c.slug&&p.status==="won").length;
+    const slots=Math.max(0,(state.playersNeeded||DEFAULT_PLAYERS_CAP)-players);
+    const perSlot = slots>0 ? (toNum(c.budget_left,0)/slots) : 0;
+    return { name:c.name, slug:c.slug, perSlot, budgetLeft:toNum(c.budget_left,0), slots };
+  }).sort((a,b)=>b.perSlot-a.perSlot).slice(0,3);
+}
+function winProbabilityHeuristic(p, bid){
+  // very simple signal: your bid relative to (avg of top 3 clubs per-slot), weighted by player priority
+  const top=threatClubs();
+  const bench = top.reduce((s,c)=>s+c.perSlot,0)/(top.length||1);
+  const prio = computeBidPriority(p)/120; // 0..1
+  const ratio = (bid||0) / Math.max(1, bench);
+  const score = 0.35*ratio + 0.65*prio; // 0..~1.5
+  if (score>=1.05) return {label:"High", color:"#16a34a"};
+  if (score>=0.75) return {label:"Medium", color:"#f59e0b"};
+  return {label:"Low", color:"#dc2626"};
+}
+function renderInsights(p, whatIf=null){
+  const root=$("insightsContent"); if(!root) return;
+  if(!p){ root.innerHTML=`<div class="hint">Pick a player to see live insights.</div>`; return; }
+
+  const cap = suggestedCap(p);
+  const safe = Math.max(minBase(), Math.round(cap*0.85));
+  const stretch = Math.round(cap*1.15);
+  const hardCap = Math.round(maxYouCanSpendNow());
+
+  const bidForProb = toNum(whatIf, cap);
+  const winProb = winProbabilityHeuristic(p, bidForProb);
+
+  const pulse = marketPulse();
+  const threats = threatClubs();
+  const scarcity = [];
+  if (pulse.wks<=2) scarcity.push("Wicket-keepers scarce");
+  if (pulse.bowlers<=10) scarcity.push("Specialist bowlers running low");
+  if (pulse.lefties<=6) scarcity.push("Left-handers scarce");
+  if (pulse.bothDays <= Math.round(pulse.total*0.25)) scarcity.push("Two-day availability is rare");
+
+  const preMap = state.preselectedByClub || {};
+  const whoPreselected = Object.entries(preMap).filter(([slug,map])=>{
+    return map && typeof map==="object" && Object.keys(map).some(n=>n===String(p.name||"").toLowerCase());
+  }).map(([slug])=> (state.clubs||[]).find(c=>c.slug===slug)?.name).filter(Boolean);
+
+  root.innerHTML = `
+    <div class="row" style="flex-wrap:wrap; gap:10px;">
+      <div class="card" style="padding:10px; flex:1; min-width:220px;">
+        <div><b>Price band</b></div>
+        <div class="hint">Safe ~ Stretch ~ Hard Cap</div>
+        <div style="margin-top:4px; font-size:14px;">${safe} – ${stretch} (you can go up to <b>${hardCap}</b>)</div>
+      </div>
+      <div class="card" style="padding:10px; flex:1; min-width:220px;">
+        <div><b>Win probability</b></div>
+        <div class="hint">at bid = ${bidForProb}</div>
+        <div style="margin-top:4px; font-size:14px; color:${winProb.color}"><b>${winProb.label}</b></div>
+      </div>
+      <div class="card" style="padding:10px; flex:1; min-width:260px;">
+        <div><b>Threat clubs (budget/slot)</b></div>
+        <div style="margin-top:4px; font-size:13px;">
+          ${threats.map(t=>`<div>${t.name}: <b>${Math.round(t.perSlot)}</b> (left ${t.slots} slots, ${t.budgetLeft} pts)</div>`).join("") || "<div class='hint'>No threats</div>"}
+        </div>
+      </div>
+    </div>
+
+    <div class="row" style="flex-wrap:wrap; gap:10px; margin-top:10px;">
+      <div class="card" style="padding:10px; flex:1; min-width:240px;">
+        <div><b>Role & availability pulse</b></div>
+        <div class="hint">Remaining pool</div>
+        <div style="margin-top:4px; font-size:13px;">
+          WK: <b>${pulse.wks}</b> · Bowlers: <b>${pulse.bowlers}</b> · Left-handers: <b>${pulse.lefties}</b> · Both-days: <b>${pulse.bothDays}</b>
+        </div>
+      </div>
+      <div class="card" style="padding:10px; flex:1; min-width:240px;">
+        <div><b>Scarcity alerts</b></div>
+        <div style="margin-top:4px; font-size:13px;">
+          ${scarcity.length ? scarcity.map(s=>`<div>• ${s}</div>`).join("") : `<div class="hint">No strong scarcity signals yet.</div>`}
+        </div>
+      </div>
+      <div class="card" style="padding:10px; flex:1; min-width:240px;">
+        <div><b>Marked by rivals</b></div>
+        <div style="margin-top:4px; font-size:13px;">
+          ${whoPreselected.length ? whoPreselected.map(n=>`<div>• ${n}</div>`).join("") : `<div class="hint">No rival preselect found for this player.</div>`}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ============= CSV parsing / validation ============= */
 function splitCsv(text){ const rows=[],row=[],push=()=>rows.push(row.splice(0,row.length)); let cell="",inQ=false; for(let i=0;i<text.length;i++){ const ch=text[i],nx=text[i+1]; if(inQ){ if(ch==='"'&&nx=='"'){cell+='"';i++;continue;} if(ch=='"'){inQ=false;continue;} cell+=ch; continue;} if(ch=='"'){inQ=true;continue;} if(ch===','){row.push(cell);cell="";continue;} if(ch=='\n'){row.push(cell);cell="";push();continue;} cell+=ch;} row.push(cell); push(); return rows; }
 function parseCSVPlayers(raw){
   const rows=splitCsv(raw).filter(r=>r.some(c=>String(c).trim()!=="")); if(!rows.length) return [];
@@ -173,6 +291,10 @@ function parseCSVPlayers(raw){
     availability_flag: idx("availability_flag"),
     bid_priority_score: idx("bid_priority_score")
   };
+  const required = ["name"]; // minimal requirement
+  const missing = required.filter(r=> idx(r)===-1 );
+  if (missing.length){ throw new Error("Missing required header(s): "+missing.join(", ")); }
+
   const players=[];
   body.forEach((cols,idxRow)=>{
     const name = (cols[i.name]||"").trim(); if(!name) return;
@@ -221,12 +343,6 @@ function recomputeBudgetsFromWins(){
     c.starting_budget = state.totalPoints || DEFAULT_TOTAL_POINTS;
     c.budget_left = Math.max(0, c.starting_budget - spent);
   });
-}
-function guardrailOK(bid){
-  const rem=remainingSlots();
-  const floor=minBase();
-  const bud=remainingBudget(state.myClubSlug);
-  return bid<=bud && bud-bid>=(rem-1)*floor;
 }
 
 /* ============= Live flow ============= */
@@ -342,7 +458,7 @@ function renderComplianceBar(){
 
 function renderLiveBid(){
   const live=$("liveBid"); if(!live) return; const p=getActivePlayer();
-  if(!p){ live.innerHTML = `<div class="hint">No active player. Use the Name picker or click Pick on the list.</div>`; return; }
+  if(!p){ live.innerHTML = `<div class="hint">No active player. Use the Name picker or click Pick on the list.</div>`; renderInsights(null); return; }
   const pi = computePerformanceIndex(p); const priority=computeBidPriority(p); const cap=suggestedCap(p);
   const must = (p.must_bid_flag && /y|yes|true/i.test(String(p.must_bid_flag))) || (pi>=MUST_BID_THRESHOLD && availabilityIsBothDays(p.availability));
   const lowAvail=!availabilityIsBothDays(p.availability);
@@ -373,13 +489,17 @@ function renderLiveBid(){
     const raw=bidEl.value; if(!raw||!String(raw).trim().length){ warnEl.textContent="Enter a bid (≥ "+minBase()+")."; wonBtn.disabled=true; return false; }
     const price=Number(raw); if(!Number.isFinite(price)||price<minBase()){ warnEl.textContent="Enter a bid (≥ "+minBase()+")."; wonBtn.disabled=true; return false; }
     const ok=guardrailOK(price); wonBtn.disabled=!ok; const floor=Math.max(0,(remainingSlots()-1)*minBase()); warnEl.textContent = ok?"":`Guardrail: keep ≥ ${floor} for remaining slots.`; return ok; };
-  bidEl.addEventListener("input", validate); validate();
+  bidEl.addEventListener("input", ()=>{ validate(); renderInsights(p, Number(bidEl.value)||null); });
+  validate();
   wonBtn.addEventListener("click", ()=>{ if(!validate()) return; markWon(p.id, Number(bidEl.value)); });
   $("btn-pass")?.addEventListener("click", ()=>{
     const panel=$("passPanel"); if(!panel) return;
     panel.style.display="block"; panel.scrollIntoView({behavior:"smooth", block:"center"});
     wirePassPanelForPlayer(p);
   });
+
+  // Insights initial render
+  renderInsights(p, Number(bidEl.value)||null);
 }
 
 function updateHeaderStats(){
@@ -407,7 +527,7 @@ function wirePassPanelForPlayer(p){
   }
 }
 
-/* ============= Export ============= */
+/* ============= Export / Template ============= */
 function exportWonCSV(){
   const won=(state.players||[]).filter(p=>p.status==="won");
   const rows=[["Club","Player Name","Alumni","Phone","Final Bid"]];
@@ -415,11 +535,38 @@ function exportWonCSV(){
     const club=(state.clubs||[]).find(c=>c.slug===p.owner);
     rows.push([club?club.name:(p.owner||""), p.name||"", p.alumni||"", p.phone||"", toNum(p.finalBid,0)]);
   });
+  downloadCSV(rows, "auction-won-contacts.csv");
+}
+function exportAllStateCSV(){
+  const rows=[[
+    "Player ID","Player Name","Alumni","Phone","Role","Batting","Bowling","Category","Base",
+    "Availability","PI","Priority","Status","Owner","Final Bid"
+  ]];
+  (state.players||[]).forEach(p=>{
+    rows.push([
+      p.id, p.name||"", p.alumni||"", p.phone||"", p.skill||"", p.batting_type||"", p.bowling_type||"",
+      toNum(p.category,""), toNum(p.base_point,""), p.availability||"",
+      computePerformanceIndex(p), computeBidPriority(p), p.status||"", (p.owner||""), toNum(p.finalBid,"")
+    ]);
+  });
+  downloadCSV(rows, "auction-full-state.csv");
+}
+function downloadCSV(rows, filename){
   const csv=rows.map(r=>r.map(v=>{
     const s=String(v??""); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
   }).join(",")).join("\n");
   const blob=new Blob([csv],{type:"text/csv;charset=utf-8"}), url=URL.createObjectURL(blob);
-  const a=document.createElement("a"); a.href=url; a.download="auction-won-contacts.csv"; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
+  const a=document.createElement("a"); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
+}
+function downloadTemplateCSV(){
+  const headers = [
+    "player_id","name","alumni","phone","skill","batting_type","bowling_type","wk",
+    "availability","category","base_point","previous_team","matches_played","bat_avg",
+    "strike_rate","runs","50s","100s","not_outs","wickets","eco_rate","best_bowling",
+    "five_wkts","catches","runouts","performance_index","popularity_index",
+    "must_bid_flag","availability_flag","bid_priority_score"
+  ];
+  downloadCSV([headers], "HRB_Auction_Master_Template.csv");
 }
 
 /* ============= Settings & Startup ============= */
@@ -473,7 +620,10 @@ function wireCsvImportUI(){
   const urlEl=$("csvUrl"), pasteEl=$("csvPaste");
   const btnFetch=$("btn-fetch"), btnImport=$("btn-import");
   const btnClearUrl=$("btn-clear-url"), btnClearPaste=$("btn-clear-paste");
+  const btnTemplate=$("btn-download-template");
   const setMsg=(t)=>{ const m=$("importMsg"); if(m) m.textContent=t; };
+
+  if(btnTemplate){ btnTemplate.onclick = downloadTemplateCSV; }
 
   if(btnFetch&&urlEl){
     btnFetch.onclick=null; btnFetch.addEventListener("click", async()=>{
@@ -497,7 +647,7 @@ function wireCsvImportUI(){
         ensureDefaultClubsSeeded(); recomputeBudgetsFromWins(); persist(); render();
         setMsg(`Imported ${players.length} players.`);
         $("playersList")?.scrollIntoView({behavior:"smooth", block:"start"});
-      }catch(e){ console.error(e); setMsg("Import failed. Check console."); }
+      }catch(e){ console.error(e); setMsg("Import failed: "+(e?.message||"Check console.")); }
     });
   }
   if(btnClearUrl&&urlEl){
@@ -508,10 +658,14 @@ function wireCsvImportUI(){
   }
 }
 
-function wireExportButton(){ const btn=$("btn-export"); if(!btn) return; btn.onclick=null; btn.addEventListener("click", exportWonCSV); }
+function wireExportButton(){
+  const wonBtn=$("btn-export"); if(wonBtn){ wonBtn.onclick=null; wonBtn.addEventListener("click", exportWonCSV); }
+  const allBtn=$("btn-export-state"); if(allBtn){ allBtn.onclick=null; allBtn.addEventListener("click", exportAllStateCSV); }
+}
 
 function wireStartBidUI(){
   const input=$("startName"), menu=$("startResults"), btn=$("btn-start-bid"), seed=$("seedBase");
+  const whatIf=$("whatIfBid"), applyBtn=$("btn-apply-whatif");
   if(!input||!menu||!btn) return;
   function candidates(q){ q=(q||"").trim().toLowerCase(); if(q.length<2) return []; return (state.players||[]).filter(p=>p.status!=="won").filter(p=> (p.name||"").toLowerCase().includes(q) || (p.alumni||"").toLowerCase().includes(q)).slice(0,10); }
   input.addEventListener("input", ()=>{
@@ -536,6 +690,12 @@ function wireStartBidUI(){
       if(seed){ seed.value = Number.isFinite(exact.base_point)?exact.base_point:(Number.isFinite(exact.base)?exact.base:""); }
     }
   });
+  if(applyBtn && whatIf){
+    applyBtn.onclick=null; applyBtn.addEventListener("click", ()=>{
+      const p=getActivePlayer(); if(!p) return;
+      renderInsights(p, toNum(whatIf.value,null));
+    });
+  }
 }
 
 function wireLoginUI(){
