@@ -1,7 +1,15 @@
 /* assets/app.js — HRB Auction Assist (login + settings + guardrails + compliance)
-   Works with a plain <script src="./assets/app.js"></script> in index.html
-   Baseline taken from your previous version.
+   Works with <script defer src="./assets/app.js?v=..."></script>
 */
+
+/* ===========================
+   Double-load guard
+=========================== */
+if (window.__HRB_APP_LOADED__) {
+  console.warn("app.js loaded twice; ignoring second load");
+  throw new Error("DUP_LOAD");
+}
+window.__HRB_APP_LOADED__ = true;
 
 /* ===========================
    Tiny Diagnostics
@@ -12,45 +20,28 @@
   bar.style.cssText =
     "position:fixed;left:10px;bottom:10px;z-index:99999;background:#111;color:#fff;padding:6px 10px;border-radius:8px;font:12px/1.4 system-ui";
   bar.textContent = "⏳ loading app.js...";
-  document.addEventListener(
-    "DOMContentLoaded",
-    () => (bar.textContent = "✅ DOM ready, booting...")
-  );
-  window.addEventListener("error", (e) => {
-    bar.textContent = "❌ JS error: " + e.message;
-  });
+  document.addEventListener("DOMContentLoaded", () => (bar.textContent = "✅ DOM ready, booting..."));
+  window.addEventListener("error", (e) => (bar.textContent = "❌ JS error: " + e.message));
   document.body.appendChild(bar);
-  window.__diag = (msg) => {
-    bar.textContent = "ℹ️ " + msg;
-  };
+  window.__diag = (msg) => (bar.textContent = "ℹ️ " + msg);
 })();
 
 /* ===========================
    State & Persistence
 =========================== */
 let state = {
-  // players loaded from CSV
-  players: [], // {id,name,alumni,phone,role,batting_hand,is_wk,rating,category,base,status,finalBid,owner}
-
-  // simple navigation / auth
+  players: [],                         // {id,name,alumni,phone,role,batting_hand,is_wk,rating,category,base,status,finalBid,owner}
   auth: { loggedIn: false, user: null },
-
-  // settings
   playersNeeded: 15,
   totalPoints: 15000,
-  minBasePerPlayer: 250, // ✅ your guardrail default
+  minBasePerPlayer: 250,
   categoryBase: { c1: null, c2: null, c3: null, c4: null, c5: null },
-
-  // preselected (HRB): map name -> price
   preselectedMap: {},
-
-  // clubs
   myClubSlug: "high-range-blasters",
-  clubs: [], // {id,slug,name,logo_url,starting_budget,budget_left}
-
-  // live bid
+  clubs: [],                           // {id,slug,name,logo_url,starting_budget,budget_left}
   activePlayerId: null,
 };
+
 // Factory state for a brand-new auction
 function factoryState() {
   return {
@@ -62,7 +53,7 @@ function factoryState() {
     categoryBase: { c1: null, c2: null, c3: null, c4: null, c5: null },
     preselectedMap: {},
     myClubSlug: "high-range-blasters",
-    clubs: [],          // will be seeded with HRB
+    clubs: [],
     activePlayerId: null,
   };
 }
@@ -71,21 +62,18 @@ function factoryState() {
 async function fullReset() {
   localStorage.removeItem("hrb-auction-state");
   state = factoryState();
-  await ensureMyClubSeeded();   // seeds HRB with starting & remaining = totalPoints
+  await ensureMyClubSeeded();
   persist();
 }
 
 // Soft reset: keep players but clear wins & spend; reset budgets to totalPoints
 async function resetAuctionDataKeepPlayers() {
-  // reset player statuses
-  (state.players || []).forEach(p => {
+  (state.players || []).forEach((p) => {
     p.status = "new";
     p.owner = null;
     p.finalBid = null;
   });
-  // clear preselected map
   state.preselectedMap = {};
-  // reset clubs to only HRB with fresh budget
   state.clubs = [];
   await ensureMyClubSeeded();
   persist();
@@ -100,10 +88,8 @@ function load() {
   try {
     const s = JSON.parse(localStorage.getItem("hrb-auction-state") || "{}");
     if (s && typeof s === "object") {
-      // shallow merge; keep defaults for anything missing
       state = { ...state, ...s };
-      // ensure structures exist
-      state.categoryBase = { c1: null, c2: null, c3: null, c4: null, c5: null, ...(s.categoryBase||{}) };
+      state.categoryBase = { c1: null, c2: null, c3: null, c4: null, c5: null, ...(s.categoryBase || {}) };
       state.preselectedMap = s.preselectedMap || {};
     }
   } catch {}
@@ -115,10 +101,7 @@ function load() {
 const $ = (id) => document.getElementById(id);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 function slugify(s) {
-  return String(s || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
+  return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 function toNum(v, d = 0) {
   const n = Number(v);
@@ -129,10 +112,11 @@ function normalizeHeader(s) {
 }
 function show(el, on = true) {
   if (!el) return;
-  el.style.display = on ? "block" : "none";
+  el.style.display = on ? "block" : "none"; // force override CSS display:none
 }
-
-function isHidden(el){ return !el || el.offsetParent === null; }
+function isHidden(el) {
+  return !el || getComputedStyle(el).display === "none";
+}
 
 /* ===========================
    Roster / Budget helpers
@@ -141,9 +125,7 @@ function myClub() {
   return (state.clubs || []).find((c) => c.slug === state.myClubSlug) || null;
 }
 function remainingSlots() {
-  const mine = (state.players || []).filter(
-    (p) => p.owner === state.myClubSlug && p.status === "won"
-  ).length;
+  const mine = (state.players || []).filter((p) => p.owner === state.myClubSlug && p.status === "won").length;
   return Math.max(0, (state.playersNeeded || 15) - mine);
 }
 function remainingBudget(clubSlug) {
@@ -155,25 +137,19 @@ function guardrailOK(bid) {
   const rem = remainingSlots();
   const floor = state.minBasePerPlayer || 250;
   const bud = remainingBudget(state.myClubSlug);
-  return bid <= bud && (bud - bid) >= (rem - 1) * floor;
+  return bid <= bud && bud - bid >= (rem - 1) * floor;
 }
 
 /* ===========================
-   Supabase (optional)
+   Supabase (optional, safe)
 =========================== */
 function supabaseAvailable() {
-  return !!(
-    window.ENV?.SUPABASE_URL &&
-    window.ENV?.SUPABASE_ANON_KEY &&
-    window.supabase?.createClient
-  );
+  return !!(window.ENV?.SUPABASE_URL && window.ENV?.SUPABASE_ANON_KEY && window.supabase?.createClient);
 }
 let sb = null;
-if (supabaseAvailable())
-  sb = window.supabase.createClient(
-    window.ENV.SUPABASE_URL,
-    window.ENV.SUPABASE_ANON_KEY
-  );
+if (supabaseAvailable()) {
+  sb = window.supabase.createClient(window.ENV.SUPABASE_URL, window.ENV.SUPABASE_ANON_KEY);
+}
 
 /* ===========================
    Clubs
@@ -192,12 +168,11 @@ async function ensureMyClubSeeded() {
     });
     persist();
   } else {
-    // sync starting_budget with totalPoints if changed in settings
     const c = myClub();
     if (c && toNum(c.starting_budget) !== toNum(state.totalPoints)) {
-      const spent = (state.players||[])
-        .filter(p => p.owner===state.myClubSlug && p.status==="won")
-        .reduce((s,p)=> s+toNum(p.finalBid,0), 0);
+      const spent = (state.players || [])
+        .filter((p) => p.owner === state.myClubSlug && p.status === "won")
+        .reduce((s, p) => s + toNum(p.finalBid, 0), 0);
       c.starting_budget = toNum(state.totalPoints, 15000);
       c.budget_left = Math.max(0, c.starting_budget - spent);
       persist();
@@ -210,8 +185,7 @@ function getOtherClubs() {
 async function addClubLocal({ name, logo_url, starting_budget }) {
   const slug = slugify(name);
   if (!slug) throw new Error("Enter club name");
-  if ((state.clubs || []).some((c) => c.slug === slug))
-    throw new Error("Club already exists");
+  if ((state.clubs || []).some((c) => c.slug === slug)) throw new Error("Club already exists");
   const start = toNum(starting_budget, 15000);
   state.clubs.push({
     id: `local-${Date.now()}`,
@@ -224,9 +198,7 @@ async function addClubLocal({ name, logo_url, starting_budget }) {
   persist();
 }
 function clubStats(slug) {
-  const players = (state.players || []).filter(
-    (p) => p.owner === slug && p.status === "won"
-  );
+  const players = (state.players || []).filter((p) => p.owner === slug && p.status === "won");
   const spend = players.reduce((s, p) => s + toNum(p.finalBid, 0), 0);
   const c = (state.clubs || []).find((c) => c.slug === slug);
   const budgetLeft = c ? Math.max(0, toNum(c.starting_budget, 0) - spend) : 0;
@@ -237,11 +209,9 @@ function clubStats(slug) {
    CSV parsing
 =========================== */
 function splitCsv(text) {
-  const rows = [],
-    row = [],
-    pushRow = () => {
-      rows.push(row.splice(0, row.length));
-    };
+  const rows = [];
+  const row = [];
+  const pushRow = () => rows.push(row.splice(0, row.length));
   let cell = "",
     inQ = false;
   for (let i = 0; i < text.length; i++) {
@@ -282,9 +252,7 @@ function splitCsv(text) {
   return rows;
 }
 function parseCSVPlayers(raw) {
-  const rows = splitCsv(raw).filter((r) =>
-    r.some((c) => String(c).trim() !== "")
-  );
+  const rows = splitCsv(raw).filter((r) => r.some((c) => String(c).trim() !== ""));
   if (!rows.length) return [];
   const headerIdx = rows.findIndex((r) => {
     const h = r.map(normalizeHeader);
@@ -309,16 +277,7 @@ function parseCSVPlayers(raw) {
   const iWK = idx("wk", "wicket keeper", "is_wk", "keeper");
   const iBase = idx("base", "seed", "start bid", "seed base", "base value");
   const iCat = idx("category", "cat");
-  const iPhone = idx(
-    "phone",
-    "phone number",
-    "mobile",
-    "mobile number",
-    "contact",
-    "whatsapp",
-    "whatsapp number",
-    "ph"
-  );
+  const iPhone = idx("phone", "phone number", "mobile", "mobile number", "contact", "whatsapp", "whatsapp number", "ph");
 
   const yes = (v) => /^(true|yes|y|1)$/i.test(String(v || "").trim());
 
@@ -332,10 +291,7 @@ function parseCSVPlayers(raw) {
     const role = iRole >= 0 ? String(cols[iRole]).trim() : "";
     const hand = iHand >= 0 ? String(cols[iHand]).trim() : "";
     const is_wk = iWK >= 0 ? yes(cols[iWK]) : /wk|keeper/i.test(role);
-    const base =
-      iBase >= 0 && String(cols[iBase]).trim() !== ""
-        ? Number(cols[iBase])
-        : null;
+    const base = iBase >= 0 && String(cols[iBase]).trim() !== "" ? Number(cols[iBase]) : null;
     const category = iCat >= 0 ? String(cols[iCat]).trim() : "";
     const phone = iPhone >= 0 ? String(cols[iPhone]).trim() : "";
     players.push({
@@ -380,10 +336,7 @@ function markWon(playerId, price) {
 
   const c = myClub();
   if (c) {
-    c.budget_left = Math.max(
-      0,
-      toNum(c.budget_left, c.starting_budget || 0) - bid
-    );
+    c.budget_left = Math.max(0, toNum(c.budget_left, c.starting_budget || 0) - bid);
   }
   persist();
   render();
@@ -410,10 +363,7 @@ function assignToClubByNameOrSlug(playerId, clubText, price) {
   p.status = "won";
   p.finalBid = bid;
   p.owner = club.slug;
-  club.budget_left = Math.max(
-    0,
-    toNum(club.budget_left, club.starting_budget || 0) - bid
-  );
+  club.budget_left = Math.max(0, toNum(club.budget_left, club.starting_budget || 0) - bid);
 
   persist();
   render();
@@ -444,9 +394,7 @@ function isBowler(role) {
   return /bowl/i.test(String(role || "")); // covers "Bowler", "Allrounder (Bowling)", etc.
 }
 function complianceForMySquad() {
-  const mine = (state.players || []).filter(
-    (p) => p.owner === state.myClubSlug && p.status === "won"
-  );
+  const mine = (state.players || []).filter((p) => p.owner === state.myClubSlug && p.status === "won");
   const wk = mine.filter((p) => p.is_wk).length;
   const lhb = mine.filter((p) => isLeftHand(p.batting_hand)).length;
   const bowl = mine.filter((p) => isBowler(p.role) || /all/i.test(p.role)).length;
@@ -457,8 +405,7 @@ function renderComplianceBar() {
   if (!root) return;
   const { wk, lhb, bowl } = complianceForMySquad();
   const need = { wk: 2, lhb: 2, bowl: 8 };
-  const ok = (cur, req) =>
-    `<b style="color:${cur >= req ? "#16a34a" : "#dc2626"}">${cur}/${req}</b>`;
+  const ok = (cur, req) => `<b style="color:${cur >= req ? "#16a34a" : "#dc2626"}">${cur}/${req}</b>`;
   root.innerHTML = `
     <div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:8px">
       <span>WK: ${ok(wk, need.wk)}</span>
@@ -487,9 +434,7 @@ function renderPlayersList() {
           <div class="row" style="display:flex;justify-content:space-between;gap:8px">
             <div>
               <div><b>${p.name}</b></div>
-              <div class="meta" style="color:#6b7280">${p.alumni || ""}${
-            p.alumni && p.phone ? " · " : ""
-          }${p.phone || ""}</div>
+              <div class="meta" style="color:#6b7280">${p.alumni || ""}${p.alumni && p.phone ? " · " : ""}${p.phone || ""}</div>
             </div>
             <button class="btn btn-ghost" data-id="${p.id}" data-action="pick">Pick</button>
           </div>
@@ -513,9 +458,7 @@ function renderSelectedSquad() {
       <div class="meta">Players: <b>${stats.count}</b></div>
     </div>
   `;
-  root.innerHTML = stats.players.length
-    ? header + stats.players.map(miniRow).join("")
-    : header + `<div class="hint">No players won yet.</div>`;
+  root.innerHTML = stats.players.length ? header + stats.players.map(miniRow).join("") : header + `<div class="hint">No players won yet.</div>`;
 }
 
 function renderOtherClubsPanel() {
@@ -529,9 +472,7 @@ function renderOtherClubsPanel() {
   root.innerHTML = others
     .map((c) => {
       const stats = clubStats(c.slug);
-      const list = stats.players.length
-        ? stats.players.map(miniRow).join("")
-        : `<div class="hint">No players yet.</div>`;
+      const list = stats.players.length ? stats.players.map(miniRow).join("") : `<div class="hint">No players yet.</div>`;
       return `
       <div class="club-box" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:10px;background:#fff">
         <div class="club-head" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
@@ -557,9 +498,7 @@ function renderLiveBid() {
   live.innerHTML = `
     <div class="card" style="padding:12px">
       <div style="font-size:18px;font-weight:700">${p.name}</div>
-      <div class="meta" style="color:#6b7280">${p.alumni || ""}${
-    p.alumni && p.phone ? " · " : ""
-  }${p.phone || ""}</div>
+      <div class="meta" style="color:#6b7280">${p.alumni || ""}${p.alumni && p.phone ? " · " : ""}${p.phone || ""}</div>
       <div class="row" style="display:flex;gap:8px;margin-top:10px;align-items:flex-end;flex-wrap:wrap">
         <label style="flex:0 1 180px">Bid Amount
           <input id="bidInput" type="number" placeholder="e.g. 900" />
@@ -584,10 +523,7 @@ function renderLiveBid() {
     }
     const ok = guardrailOK(price);
     wonBtn.disabled = !ok;
-    const floor = Math.max(
-      0,
-      (remainingSlots() - 1) * (state.minBasePerPlayer || 250)
-    );
+    const floor = Math.max(0, (remainingSlots() - 1) * (state.minBasePerPlayer || 250));
     warnEl.textContent = ok ? "" : `Guardrail: keep ≥ ${floor} for remaining slots.`;
     return ok;
   };
@@ -610,16 +546,13 @@ function renderLiveBid() {
 }
 
 function updateHeaderStats() {
-  // top-left controls panel fields & guardrail summary
   const c = myClub();
   const remainingPts = c ? toNum(c.budget_left, c.starting_budget || 0) : 0;
   const remSlots = remainingSlots();
   const guardEl = $("guardrail");
   if ($("remainingPoints")) $("remainingPoints").textContent = remainingPts;
   if ($("remainingSlots")) $("remainingSlots").textContent = remSlots;
-  if (guardEl)
-    guardEl.innerHTML =
-      `Guardrail (min per slot): <b>${state.minBasePerPlayer || 250}</b>`;
+  if (guardEl) guardEl.innerHTML = `Guardrail (min per slot): <b>${state.minBasePerPlayer || 250}</b>`;
 }
 
 function render() {
@@ -690,9 +623,7 @@ function wireCsvImportUI() {
         setMsg("Fetched CSV — click Import to load players.");
       } catch (e) {
         console.error(e);
-        setMsg(
-          "Fetch failed. Ensure sheet is 'Published to the web' and URL ends with output=csv."
-        );
+        setMsg("Fetch failed. Ensure sheet is 'Published to the web' and URL ends with output=csv.");
       }
     });
   }
@@ -710,30 +641,21 @@ function wireCsvImportUI() {
 
         let players = parseCSVPlayers(raw);
         if (!players.length) {
-          // fallback: simple rows → name, alumni?, phone?
           const rows = splitCsv(raw);
           players = rows
             .map((r, i) => {
               const name = String(r[0] || "").trim();
               if (!name) return null;
-              return {
-                id: String(i + 1),
-                name,
-                alumni: String(r[1] || "").trim(),
-                phone: String(r[2] || "").trim(),
-                status: "new",
-              };
+              return { id: String(i + 1), name, alumni: String(r[1] || "").trim(), phone: String(r[2] || "").trim(), status: "new" };
             })
             .filter(Boolean);
         }
 
-        // normalize statuses
         players = players.map((p) => ({ ...p, status: p.status === "won" ? "won" : "new" }));
 
         state.players = players;
         state.playersNeeded = state.playersNeeded || 15;
 
-        // auto-apply preselected to HRB
         applyPreselectedToRoster();
 
         persist();
@@ -841,11 +763,7 @@ function wireStartBidUI() {
     if (q.length < 2) return [];
     return (state.players || [])
       .filter((p) => p.status !== "won")
-      .filter(
-        (p) =>
-          (p.name || "").toLowerCase().includes(q) ||
-          (p.alumni || "").toLowerCase().includes(q)
-      )
+      .filter((p) => (p.name || "").toLowerCase().includes(q) || (p.alumni || "").toLowerCase().includes(q))
       .slice(0, 10);
   }
 
@@ -857,11 +775,7 @@ function wireStartBidUI() {
       return;
     }
     menu.style.display = "block";
-    menu.innerHTML = list
-      .map((p) => `<div class="ta-item" data-id="${p.id}">${p.name}${
-        p.alumni ? " · " + p.alumni : ""
-      }</div>`)
-      .join("");
+    menu.innerHTML = list.map((p) => `<div class="ta-item" data-id="${p.id}">${p.name}${p.alumni ? " · " + p.alumni : ""}</div>`).join("");
     $$(".ta-item", menu).forEach((el) => {
       el.addEventListener("click", () => {
         const id = el.getAttribute("data-id");
@@ -869,17 +783,12 @@ function wireStartBidUI() {
         menu.style.display = "none";
         if (seed) {
           const player = state.players.find((x) => x.id === id);
-          // prefer CSV base; otherwise use category base fallback if present
           let base = Number.isFinite(player?.base) ? player.base : null;
           if (base == null && player?.category) {
             const cat = String(player.category).trim();
-            const map = { c1: state.categoryBase.c1, c2: state.categoryBase.c2, c3: state.categoryBase.c3, c4: state.categoryBase.c4, c5: state.categoryBase.c5 };
+            const map = state.categoryBase;
             const byName =
-              /1/i.test(cat) ? map.c1 :
-              /2/i.test(cat) ? map.c2 :
-              /3/i.test(cat) ? map.c3 :
-              /4/i.test(cat) ? map.c4 :
-              /5/i.test(cat) ? map.c5 : null;
+              /1/i.test(cat) ? map.c1 : /2/i.test(cat) ? map.c2 : /3/i.test(cat) ? map.c3 : /4/i.test(cat) ? map.c4 : /5/i.test(cat) ? map.c5 : null;
             base = Number.isFinite(byName) ? byName : null;
           }
           seed.value = Number.isFinite(base) ? base : "";
@@ -893,11 +802,8 @@ function wireStartBidUI() {
     if (!q) return;
     const rem = (state.players || []).filter((p) => p.status !== "won");
     const exact =
-      rem.find(
-        (p) =>
-          (p.name || "").toLowerCase() === q ||
-          (((p.name || "") + " " + (p.alumni || "")).toLowerCase() === q)
-      ) || rem.find((p) => (p.name || "").toLowerCase().startsWith(q));
+      rem.find((p) => (p.name || "").toLowerCase() === q || ((p.name || "") + " " + (p.alumni || "")).toLowerCase() === q) ||
+      rem.find((p) => (p.name || "").toLowerCase().startsWith(q));
     if (exact) {
       setActivePlayer(exact.id);
       if (seed) {
@@ -906,11 +812,7 @@ function wireStartBidUI() {
           const map = state.categoryBase;
           const cat = String(exact.category).trim();
           const byName =
-            /1/i.test(cat) ? map.c1 :
-            /2/i.test(cat) ? map.c2 :
-            /3/i.test(cat) ? map.c3 :
-            /4/i.test(cat) ? map.c4 :
-            /5/i.test(cat) ? map.c5 : null;
+            /1/i.test(cat) ? map.c1 : /2/i.test(cat) ? map.c2 : /3/i.test(cat) ? map.c3 : /4/i.test(cat) ? map.c4 : /5/i.test(cat) ? map.c5 : null;
           base = Number.isFinite(byName) ? byName : null;
         }
         seed.value = Number.isFinite(base) ? base : "";
@@ -930,7 +832,6 @@ function wireLoginUI() {
   const err = $("loginError");
   if (!view || !btn) return;
 
-  // initial visibility
   show(view, !state.auth.loggedIn);
   show($("settingsView"), false);
   show($("appMain"), state.auth.loggedIn);
@@ -946,21 +847,18 @@ function wireLoginUI() {
         return;
       }
 
-      // set auth, seed HRB budget, persist
       state.auth.loggedIn = true;
       state.auth.user = "HRB";
       await ensureMyClubSeeded();
       persist();
 
-      // navigate to SETTINGS first
       show(view, false);
       show($("appMain"), false);
       show($("settingsView"), true);
 
-      // prefill settings inputs
       $("cfgPlayersCap") && ($("cfgPlayersCap").value = state.playersNeeded);
       $("cfgTotalPoints") && ($("cfgTotalPoints").value = state.totalPoints);
-      $("cfgGuardMin")   && ($("cfgGuardMin").value   = state.minBasePerPlayer || 250);
+      $("cfgGuardMin") && ($("cfgGuardMin").value = state.minBasePerPlayer || 250);
       console.info("[HRB] login OK → settingsView shown");
     } catch (e) {
       console.error(e);
@@ -970,7 +868,6 @@ function wireLoginUI() {
 }
 
 function parsePreselectedText(txt, fallbackSingleBid) {
-  // Accept "Name=1200; Name2=900"  OR just "Name" + single bid field
   const out = {};
   const raw = String(txt || "").trim();
   if (!raw) return out;
@@ -982,7 +879,6 @@ function parsePreselectedText(txt, fallbackSingleBid) {
       if (name) out[name.toLowerCase()] = toNum(val, 0);
     });
   } else {
-    // single name
     out[raw.toLowerCase()] = toNum(fallbackSingleBid, 0);
   }
   return out;
@@ -996,18 +892,15 @@ function applyPreselectedToRoster() {
   const c = myClub();
   if (!c) return;
 
-  let newlySpent = 0;
   (state.players || []).forEach((p) => {
     const key = (p.name || "").toLowerCase();
     if (!map[key]) return;
-    if (p.status === "won" && p.owner === state.myClubSlug) return; // already applied
+    if (p.status === "won" && p.owner === state.myClubSlug) return;
     p.status = "won";
     p.owner = state.myClubSlug;
     p.finalBid = toNum(map[key], 0);
-    newlySpent += toNum(map[key], 0);
   });
 
-  // adjust HRB budget (starting_budget already synced in ensureMyClubSeeded)
   const spentExisting = (state.players || [])
     .filter((p) => p.owner === state.myClubSlug && p.status === "won")
     .reduce((s, p) => s + toNum(p.finalBid, 0), 0);
@@ -1018,10 +911,7 @@ function applyPreselectedToRoster() {
 
 function recomputeAvailableScorePreview() {
   const total = toNum($("cfgTotalPoints")?.value, state.totalPoints || 15000);
-  const pre = parsePreselectedText(
-    $("cfgPreName")?.value,
-    toNum($("cfgPreBid")?.value, 0)
-  );
+  const pre = parsePreselectedText($("cfgPreName")?.value, toNum($("cfgPreBid")?.value, 0));
   const preSum = Object.values(pre).reduce((s, v) => s + toNum(v, 0), 0);
   const out = Math.max(0, total - preSum);
   if ($("cfgAvailableScore")) $("cfgAvailableScore").textContent = out;
@@ -1031,7 +921,6 @@ function wireSettingsUI() {
   const view = $("settingsView");
   if (!view) return;
 
-  // live preview of available score after preselected
   ["cfgTotalPoints", "cfgPreName", "cfgPreBid"].forEach((id) => {
     const el = $(id);
     if (el) el.addEventListener("input", recomputeAvailableScorePreview);
@@ -1054,17 +943,10 @@ function wireSettingsUI() {
       const c4 = toNum($("cfgBaseC4")?.value, NaN);
       const c5 = toNum($("cfgBaseC5")?.value, NaN);
 
-      const guardMin = toNum(
-        $("cfgGuardMin")?.value,
-        Number.isFinite(c5) ? c5 : state.minBasePerPlayer || 250
-      );
+      const guardMin = toNum($("cfgGuardMin")?.value, Number.isFinite(c5) ? c5 : state.minBasePerPlayer || 250);
 
-      const preMap = parsePreselectedText(
-        $("cfgPreName")?.value,
-        toNum($("cfgPreBid")?.value, 0)
-      );
+      const preMap = parsePreselectedText($("cfgPreName")?.value, toNum($("cfgPreBid")?.value, 0));
 
-      // save to state
       state.playersNeeded = playersCap;
       state.totalPoints = totalPts;
       state.minBasePerPlayer = guardMin;
@@ -1077,21 +959,16 @@ function wireSettingsUI() {
       };
       state.preselectedMap = preMap;
 
-      // ensure HRB exists & sync budgets
       await ensureMyClubSeeded();
 
-      // recompute HRB budget after preselected (will be applied after import too)
       const c = myClub();
       if (c) {
-        const preSum = Object.values(preMap).reduce((s, v) => s + toNum(v, 0), 0);
         c.starting_budget = totalPts;
-        // If players already imported, apply now; else this will reflect once import happens.
         applyPreselectedToRoster();
       }
 
       persist();
 
-      // navigate to main app
       show(view, false);
       show($("appMain"), true);
       render();
@@ -1144,13 +1021,11 @@ function wireTopControls() {
 
   if (btnShuffle)
     btnShuffle.addEventListener("click", () => {
-      // simple shuffle of remaining players -> queue not used elsewhere
       const rem = (state.players || []).filter((p) => p.status !== "won");
       for (let i = rem.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [rem[i], rem[j]] = [rem[j], rem[i]];
       }
-      // set first as active
       const first = rem[0];
       if (first) setActivePlayer(first.id);
     });
@@ -1166,7 +1041,6 @@ function wireTopControls() {
 
   if (btnUndo)
     btnUndo.addEventListener("click", () => {
-      // undo last HRB win
       const hrbWins = (state.players || [])
         .filter((p) => p.owner === state.myClubSlug && p.status === "won")
         .sort((a, b) => (b.finalBidTs || 0) - (a.finalBidTs || 0));
@@ -1191,22 +1065,19 @@ function wireTopControls() {
     });
 
   if (btnLogout) {
-  show(btnLogout, true);
-  btnLogout.onclick = null;
-  btnLogout.addEventListener("click", async () => {
-    await fullReset();                 // resets state + budgets to defaults
-    persist();
-    show($("appMain"), false);
-    show($("settingsView"), false);
-    show($("loginView"), true);
-    $("loginUser")?.focus();
-    console.info("[HRB] full reset → loginView shown");
-  });
+    show(btnLogout, true);
+    btnLogout.onclick = null;
+    btnLogout.addEventListener("click", async () => {
+      await fullReset(); // resets state + budgets to defaults
+      persist();
+      show($("appMain"), false);
+      show($("settingsView"), false);
+      show($("loginView"), true);
+      $("loginUser")?.focus();
+      console.info("[HRB] full reset → loginView shown");
+    });
+  }
 }
-
-
-  
-
 
 /* ===========================
    Boot
@@ -1215,15 +1086,14 @@ async function boot() {
   window.__diag && __diag("boot() start");
   load();
   await ensureMyClubSeeded();
-  wireLoginUI();        // new
-  wireSettingsUI();     // new
+  wireLoginUI();
+  wireSettingsUI();
   wireCreateClubUI();
   wireCsvImportUI();
   wireStartBidUI();
   wireExportButton();
-  wireTopControls();    // new
+  wireTopControls();
   if (state.auth.loggedIn) {
-    // if user is already logged in from past session, jump to app or settings
     show($("loginView"), false);
     show($("settingsView"), false);
     show($("appMain"), true);
@@ -1232,20 +1102,24 @@ async function boot() {
   window.__diag && __diag("boot() done");
 }
 document.addEventListener("DOMContentLoaded", boot);
-// Failsafe: ensure *some* screen is visible
-(function ensureVisible() {
-  const login = document.getElementById('loginView');
-  const settings = document.getElementById('settingsView');
-  const app = document.getElementById('appMain');
 
-  // If all are hidden, pick based on auth and show one.
-  const allHidden = [login, settings, app].every(el => !el || getComputedStyle(el).display === 'none');
+/* ===========================
+   Failsafe visibility
+=========================== */
+(function ensureVisible() {
+  const login = document.getElementById("loginView");
+  const settings = document.getElementById("settingsView");
+  const app = document.getElementById("appMain");
+  const allHidden = [login, settings, app].every((el) => !el || getComputedStyle(el).display === "none");
   if (allHidden) {
-    const st = JSON.parse(localStorage.getItem('hrb-auction-state')||'{}');
+    let st = {};
+    try {
+      st = JSON.parse(localStorage.getItem("hrb-auction-state") || "{}");
+    } catch {}
     const loggedIn = !!(st.auth && st.auth.loggedIn);
-    if (login) login.style.display = loggedIn ? 'none' : '';
-    if (settings) settings.style.display = loggedIn ? 'none' : '';
-    if (app) app.style.display = loggedIn ? '' : 'none';
-    console.warn('[hrb] All views were hidden; applied failsafe.');
+    if (login) login.style.display = loggedIn ? "none" : "block";
+    if (settings) settings.style.display = loggedIn ? "block" : "none";
+    if (app) app.style.display = loggedIn ? "block" : "none";
+    console.warn("[HRB] All views were hidden; applied failsafe.");
   }
 })();
