@@ -1,95 +1,93 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HRB Auction Assistant</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HRB Auction Assist — Assistant Mode</title>
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:#0b1220; color:#e5e7eb; margin:0;}
-    header{padding:12px 16px; background:#0f172a; border-bottom:1px solid #1f2937; display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:10;}
-    .brand{font-weight:700; font-size:15px; letter-spacing:.4px}
-    main{padding:16px; display:grid; grid-template-columns: 360px 1fr; gap:16px;}
-    .card{background:#111827; border:1px solid #1f2937; border-radius:12px; padding:12px;}
-    .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
-    .btn{background:#1f2937; color:#e5e7eb; border:1px solid #374151; padding:8px 10px; border-radius:10px; cursor:pointer}
-    .btn[disabled]{opacity:.5; cursor:not-allowed}
-    .btn-primary{background:#2563eb; border-color:#1d4ed8}
-    .pill{background:#0b1328; border:1px solid #1e2b45; padding:2px 8px; border-radius:999px; font-size:12px;}
-    .muted{color:#94a3b8; font-size:12px}
-    input, select{background:#0b1328; color:#e5e7eb; border:1px solid #1e2b45; border-radius:10px; padding:8px; outline:none}
-    #players{max-height:60vh; overflow:auto;}
-    .player{padding:8px; border-radius:8px; border:1px solid #1f2937; margin-bottom:6px; cursor:pointer}
-    .player.active{outline:2px solid #2563eb}
-    .grid2{display:grid; grid-template-columns:1fr 1fr; gap:8px}
-    .warn{color:#f59e0b}
-    .err{color:#ef4444}
-    .ok{color:#10b981}
-    .timerbar{display:flex; gap:8px; align-items:center}
-    .timer{font-weight:700; padding:2px 8px; border-radius:8px; background:#0b1328; border:1px solid #1e2b45}
+    :root { --bg:#0b1220; --card:#0f172a; --muted:#94a3b8; --line:#1f2937; --pill:#0b1328; --text:#e5e7eb; }
+    html,body { background:var(--bg); color:var(--text); font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+    .wrap { max-width:1200px; margin:0 auto; padding:16px; }
+    .top { display:flex; gap:12px; align-items:center; position:sticky; top:0; background:var(--bg); padding:12px 0; z-index:5; }
+    .pill { background:var(--pill); border:1px solid #1e2b45; padding:4px 10px; border-radius:999px; font-size:12px; }
+    .btn { background:#1f2937; border:1px solid #374151; color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer; }
+    .btn[disabled] { opacity:.5; cursor:not-allowed; }
+    .btn-ghost { background:transparent; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; }
+    .hint { color:var(--muted); font-size:12px; }
+    input,select,textarea { background:#0b1328; color:var(--text); border:1px solid #1e2b45; border-radius:10px; padding:8px; outline:none; width:100%; box-sizing:border-box; }
+    .grid3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    .flex { display:flex; gap:8px; align-items:center; }
+    .space { height:10px; }
+    #playersList { max-height:60vh; overflow:auto; }
+    .rowp { padding:8px; border:1px solid var(--line); border-radius:8px; margin-bottom:6px; cursor:pointer; }
+    .rowp.active { outline:2px solid #2563eb; }
+    .ok { color:#10b981; }
+    .warn { color:#f59e0b; }
+    .err { color:#ef4444; }
   </style>
 </head>
 <body>
-  <header>
-    <div class="brand">HRB Auction Assistant</div>
-    <div id="roundStrip" class="pill">Round: <span id="roundNo">1</span></div>
-    <div class="timerbar">
-      <span class="pill">Timer</span>
-      <span id="timer" class="timer">00:00</span>
-      <button id="btn-timer-start" class="btn">Start</button>
-      <button id="btn-timer-stop" class="btn">Stop</button>
-      <button id="btn-timer-reset" class="btn">Reset</button>
+  <div class="wrap">
+    <div class="top">
+      <div style="font-weight:700;">HRB Auction Assistant</div>
+      <div class="pill">Round: <b id="roundNo">1</b></div>
+      <div class="pill">Timer <span id="timer">00:45</span></div>
+      <button id="btn-timer-start" class="btn btn-ghost">Start</button>
+      <button id="btn-timer-stop" class="btn btn-ghost">Stop</button>
+      <button id="btn-timer-reset" class="btn btn-ghost">Reset</button>
+      <div style="flex:1"></div>
+      <button id="btn-undo" class="btn btn-ghost" disabled>Undo</button>
+      <button id="btn-export" class="btn btn-ghost">Export Won CSV</button>
+      <button id="btn-export-all" class="btn btn-ghost">Export State CSV</button>
     </div>
-    <div style="flex:1"></div>
-    <button id="btn-undo" class="btn">Undo</button>
-  </header>
 
-  <main>
-    <section class="card">
-      <div class="row" style="justify-content:space-between">
-        <div><b>Players</b></div>
-        <div class="muted">Click to select</div>
-      </div>
-      <div id="players"></div>
-    </section>
+    <div class="space"></div>
 
-    <section class="card">
-      <div class="row" style="justify-content:space-between">
-        <div><b>Live Bid</b></div>
-        <div id="clubBudget" class="muted"></div>
-      </div>
-
-      <div id="activePlayerCard" class="muted" style="margin-bottom:8px;">Select a player…</div>
-
-      <div class="grid2">
-        <label>Bid
-          <input id="bidInput" type="number" min="200" step="50" value="200" style="width:100%">
+    <div class="grid3">
+      <section class="card">
+        <div class="flex" style="justify-content:space-between"><b>Players</b><span class="hint" id="playersCount">(0)</span></div>
+        <div class="space"></div>
+        <div class="grid2">
+          <label>CSV URL
+            <input id="csvUrl" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vRlqBcvOAKBWuOGnZiWgGlYNxvTGDqtW91J03SnFdy-B-VVGaCppnvhtYkCPnRo4MnHYe414aDVmHRs/pub?gid=0&single=true&output=csv" />
+          </label>
+          <div class="flex" style="align-items:flex-end;">
+            <button id="btn-fetch" class="btn">Fetch</button>
+            <button id="btn-import" class="btn btn-ghost">Import (from text)</button>
+          </div>
+        </div>
+        <label class="space"></label>
+        <label>Or paste CSV here
+          <textarea id="csvText" rows="5" placeholder="Paste CSV…"></textarea>
         </label>
-        <label>Assign to
-          <select id="otherClubSelect" style="width:100%"></select>
-        </label>
-      </div>
+        <div id="csvMsg" class="hint"></div>
+        <div class="space"></div>
+        <div id="playersList"></div>
+      </section>
 
-      <div id="bidWarn" class="warn" style="min-height:20px;margin-top:6px;"></div>
-
-      <div class="row" style="margin-top:8px">
-        <button id="btn-mark-won" class="btn btn-primary" disabled>HRB Won</button>
-        <button id="btn-assign" class="btn">Assign to other club</button>
-        <button id="btn-next" class="btn">Next Player</button>
-      </div>
-
-      <hr style="border-color:#1f2937; margin:12px 0">
-
-      <div class="row">
+      <section class="card">
+        <b>Live Bid</b>
+        <div id="liveCard" class="hint" style="margin-top:6px;">Pick a player from the list.</div>
+        <div class="space"></div>
+        <div id="insights"></div>
+        <div class="space"></div>
         <div class="pill">Constraints: WK 2 · LHB 2 · Bowl 8</div>
-        <div id="health" class="muted"></div>
-      </div>
-      <div id="insights" class="muted" style="margin-top:8px"></div>
-    </section>
-  </main>
+        <div id="compliance" class="hint" style="margin-top:6px;"></div>
+        <div id="health" class="hint" style="margin-top:6px;"></div>
+      </section>
 
-<script defer src="./assets/app.js"></script>
-<script defer src="./assets/app.points-economy.enforcer.js"></script>
-<script defer src="./assets/app.smart-insights.addon.js"></script>
+      <section class="card">
+        <b>HRB Selected Squad</b>
+        <div id="squad" style="margin-top:6px;"></div>
+        <div class="space"></div>
+        <b>Other Clubs</b>
+        <div id="clubs" style="margin-top:6px;"></div>
+      </section>
+    </div>
+  </div>
 
+  <script src="./app.js"></script>
 </body>
 </html>
