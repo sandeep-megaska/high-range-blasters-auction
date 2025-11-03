@@ -28,6 +28,17 @@
       return byFlag || byRole;
     };
   }
+function guardrailOK(bid){
+  const remSlots = remainingSlots();
+  const bud = remainingBudget(state.myClubSlug);
+  const remainingPool = (state.players||[]).filter(p=>p.status!=="won");
+  const minReserve = remainingPool
+      .map(p=>toNum(p.base_point,minBase()))
+      .sort((a,b)=>a-b)
+      .slice(0, Math.max(0, remSlots-1))
+      .reduce((s,v)=>s+v,0);
+  return bid <= bud && bud - bid >= minReserve;
+}
 
   // --- Category-aware minimum for a player ---
   function minBidFor(p){
@@ -50,6 +61,20 @@
     if (bases.length<k) sum += (k - bases.length)*200;
     return sum;
   }
+function remainingHealth(){
+  const c = myClub();
+  const remSlots = remainingSlots();
+  const remPts = remainingBudget(state.myClubSlug);
+  const unauctioned = (state.players||[]).filter(p=>p.status!=="won");
+  const bases = unauctioned.map(p=>toNum(p.base_point,minBase())).sort((a,b)=>a-b);
+  const median = bases[Math.floor(bases.length/2)] || minBase();
+  const avgPerSlot = remPts / Math.max(1, remSlots);
+  const ratio = avgPerSlot / median;
+  let color = "#16a34a", label="Healthy";
+  if (ratio<0.8) { color="#f59e0b"; label="Tight"; }
+  if (ratio<0.5) { color="#dc2626"; label="Risk"; }
+  return {label,color,remPts,median,avgPerSlot,ratio};
+}
 
   // --- Budget helpers ---
   function remainingSlots(){
@@ -64,7 +89,7 @@
     return c?toNum(c.budget_left,c.starting_budget||0):0;
   }
 
-  // --- Guardrail: ensure (1) bid >= player min AND (2) enough left to cover the floor of remaining slots ---
+  // --- il: ensure (1) bid >= player min AND (2) enough left to cover the floor of remaining slots ---
   window.guardrailOK = function(bid, playerOpt){
     const s = getState();
     const p = playerOpt || (s.players||[]).find(x=>String(x.id)===String(s.activePlayerId));
