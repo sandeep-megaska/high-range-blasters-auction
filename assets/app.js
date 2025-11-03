@@ -579,7 +579,7 @@ function applyLoadedState(s) {
     });
 
     // ---- HEADER + SUBHEADER ----
-    const header = el("div", { class: "titlebar" }, [
+    const header = el("div", { class: "titlebar club-header" }, [
       el("div", {}, [document.createTextNode(c)]),
       el("div", { class: "titlebar-right" }, [
         document.createTextNode(`Players ${have}/${state.squadSize} • Points Left ${club.budgetLeft} • Avg/slot ${avgPerSlot}`)
