@@ -88,53 +88,61 @@
     </div>
 
     <!-- SETTINGS -->
-    <div id="settingsCard" class="card stack" style="display:none;">
-      <div class="titlebar">
-        <div><b>Pre-Auction Settings (High Range Blasters)</b></div>
-        <div class="kpi">
-          <div class="box"><div class="tiny muted">Squad Size</div><div class="n" id="kSquad">15</div></div>
-          <div class="box"><div class="tiny muted">Total Points</div><div class="n" id="kPoints">15000</div></div>
-          <div class="box"><div class="tiny muted">Tournament Min Base</div><div class="n">200</div></div>
-         
-    </div>
-
-        </div>
+<div id="settingsCard" class="card stack" style="display:none;">
+  <div class="titlebar">
+    <div><b>Pre-Auction Settings (High Range Blasters)</b></div>
+    <div class="kpi">
+      <div class="box">
+        <div class="tiny muted">Squad Size</div>
+        <div class="n" id="kSquad">15</div>
       </div>
-
-      <div class="grid2">
-        <div>
-          <label class="tiny muted">Google Sheet CSV URL (published) or any CSV URL</label>
-          <input id="csvUrl" placeholder="https://...output=csv" />
-        </div>
-        <div>
-          <label class="tiny muted">…or paste CSV below</label>
-          <textarea id="csvPaste" rows="3" placeholder="name,alumni,phone,category,base_point,performance_index,..."></textarea>
-        </div>
+      <div class="box">
+        <div class="tiny muted">Total Points</div>
+        <div class="n" id="kPoints">15000</div>
       </div>
-      <div class="hr"></div>
-      <div class="grid2">
-        <div>
-          <label class="tiny muted">Squad size</label>
-          <input id="inpSquad" type="number" min="1" value="15" />
-        </div>
-        <div>
-          <label class="tiny muted">Total points</label>
-          <input id="inpPoints" type="number" min="1" value="15000" />
-        </div>
-      </div>
-      <div class="hr"></div>
-      <div class="flex">
-        <button id="btnLoadCsv" class="btn">Load CSV</button>
-        <button id="btnProceed" class="btn primary" disabled>Proceed to Live Bid</button>
-        <span class="muted tiny" id="loadStatus"></span>
+      <div class="box">
+        <div class="tiny muted">Tournament Min Base</div>
+        <div class="n">200</div>
       </div>
     </div>
+  </div>
 
-    <!-- LIVE -->
-    <!-- LIVE (unchanged wrapper) -->
+  <div class="grid2">
+    <div>
+      <label class="tiny muted">Google Sheet CSV URL (published) or any CSV URL</label>
+      <input id="csvUrl" placeholder="https://...output=csv" />
+    </div>
+    <div>
+      <label class="tiny muted">…or paste CSV below</label>
+      <textarea id="csvPaste" rows="3" placeholder="name,alumni,phone,category,base_point,performance_index,..."></textarea>
+    </div>
+  </div>
+
+  <div class="hr"></div>
+
+  <div class="grid2">
+    <div>
+      <label class="tiny muted">Squad size</label>
+      <input id="inpSquad" type="number" min="1" value="15" />
+    </div>
+    <div>
+      <label class="tiny muted">Total points</label>
+      <input id="inpPoints" type="number" min="1" value="15000" />
+    </div>
+  </div>
+
+  <div class="hr"></div>
+
+  <div class="flex">
+    <button id="btnLoadCsv" class="btn">Load CSV</button>
+    <button id="btnProceed" class="btn primary" disabled>Proceed to Live Bid</button>
+    <span class="muted tiny" id="loadStatus"></span>
+  </div>
+</div>
+
+
+   <!-- LIVE -->
 <div id="liveCard" class="card stack" style="display:none;">
-
-  <!-- ✅ FIXED: Live top header (self-contained, all tags closed) -->
   <div class="titlebar sticky-top">
     <div class="kpi">
       <div class="box">
@@ -149,8 +157,6 @@
         <div class="tiny muted">Guardrail (200 × remaining slots)</div>
         <div class="n" id="kGuard">3000</div>
       </div>
-
-      <!-- ✅ Role KPI box (place it HERE, inside the kpi group) -->
       <div class="box" id="kRoleBox">
         <div class="tiny muted">Role Status (min)</div>
         <div class="n" style="font-size:14px;">
@@ -165,10 +171,7 @@
     </div>
   </div>
 
-  <!-- (keep everything else in LIVE exactly as before: capacityStrip, row with players/live bid/HRB squad, other clubs, etc.) -->
-
-</div>
-
+  <!-- keep your existing capacityStrip, 3-column row, advisorBox, and Other Clubs sections here -->
 
       <!-- Top-category capacity strip -->
       <div id="capacityStrip" class="card stack highlight" style="margin-bottom:12px;">
