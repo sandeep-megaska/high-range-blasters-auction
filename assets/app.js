@@ -261,6 +261,7 @@ function applyLoadedState(s) {
       loadStatus.textContent = `Loaded ${state.players.length} players.`;
       btnProceed.disabled = false;
       renderPlayers();
+       saveState();  
     } catch (e) {
       console.error(e);
       loadStatus.textContent = "Error: " + e.message;
@@ -275,6 +276,7 @@ function applyLoadedState(s) {
     updateCapacity();
     renderHRB();
     renderOtherClubs();
+     saveState();    
   });
 
   // ---------- list + search ----------
@@ -400,6 +402,7 @@ function applyLoadedState(s) {
     state.clubs[MY_CLUB].budgetLeft -= bid;
     clearActive();
     refreshAll();
+      saveState();
   }
 
   function assignOther(club, bid) {
@@ -411,6 +414,7 @@ function applyLoadedState(s) {
     state.clubs[club].budgetLeft -= bid;
     clearActive();
     refreshAll();
+      saveState();
   }
 
   function clearActive() {
@@ -590,7 +594,10 @@ function applyLoadedState(s) {
     a.remove();
   });
 
-  btnLogout.addEventListener("click", () => location.reload());
+  btnLogout.addEventListener("click", () => {
+  localStorage.removeItem(STORAGE_KEY);    // <-- add this
+  location.reload();
+});
 
   // ---------- refresh helpers ----------
   function refreshAll() {
