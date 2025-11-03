@@ -376,6 +376,64 @@ if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded"
   window.assignToClubByNameOrSlug = function(){ const r = _as.apply(this, arguments); try{ affordabilityCheck(); }catch(e){} return r; };
 })();
 </script>
+<script>
+/* ===== HRB — Hard Safety Net: never persist wins below base_point ===== */
+(function(){
+  const toNum=(v,d=0)=>{ const n=Number(v); return Number.isFinite(n)?n:d; };
+  const getState=()=>window.state||{};
+  const minBase=()=>200;
+  const playerBase = p => Math.max(minBase(), toNum(p && p.base_point, minBase()));
+
+  function enforceRosterIntegrity(opts={silent:false}) {
+    const s = getState();
+    const fixes = [];
+    (s.players||[]).forEach(p => {
+      if (p && p.status === "won") {
+        const base = playerBase(p);
+        const bid  = toNum(p.finalBid, 0);
+        // If anyone (HRB or other club) won below base, revert the win
+        if (bid < base) {
+          fixes.push({ name: p.name, bid, base, owner: p.owner });
+          // safest: revert the assignment and bid
+          p.status   = "open";
+          p.owner    = null;
+          p.finalBid = null;
+        }
+      }
+    });
+    if (fixes.length && !opts.silent) {
+      const lines = fixes.map(f => `• ${f.name}: bid ${f.bid} < base ${f.base} (owner: ${f.owner||"-"})`);
+      alert("⚠️ Invalid wins detected (below base_point).\nAll have been reverted.\n\n"+lines.join("\n"));
+    }
+    return fixes.length;
+  }
+
+  // Patch persist() to enforce before saving
+  const _persist = window.persist || function(){};
+  window.persist = function(){
+    try { enforceRosterIntegrity({silent:true}); } catch(e){}
+    return _persist.apply(this, arguments);
+  };
+
+  // Patch render() to enforce during any re-render too (silent to avoid loops)
+  const _render = window.render || function(){};
+  window.render = function(){
+    try { enforceRosterIntegrity({silent:true}); } catch(e){}
+    return _render.apply(this, arguments);
+  };
+
+  // Also check immediately after any win/assign click paths (generic delegation)
+  document.addEventListener("click", (ev)=>{
+    const t = ev.target.closest('[data-action="win"], [data-win], .btn-win, .js-win, #btn-mark-won');
+    const assign = ev.target.closest('[data-action="assign"], [data-assign], .btn-assign, .js-assign');
+    if (t || assign) {
+      // run right after the app's handler
+      setTimeout(()=>enforceRosterIntegrity({silent:false}), 0);
+    }
+  });
+
+  // Final boot-time sweep (silent)
+  tr
 
 </body>
 </html>
