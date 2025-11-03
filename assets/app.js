@@ -109,6 +109,68 @@
   const otherClubs = $("#otherClubs");
 
   // ---------- helpers ----------
+   // === Persistence ============================================================
+const STORAGE_KEY = "hrbAuctionState_v2";
+
+function saveState() {
+  try {
+    const out = {
+      loggedIn: state.loggedIn,
+      squadSize: state.squadSize,
+      totalPoints: state.totalPoints,
+      players: state.players.map(p => ({
+        id: p.id, name: p.name, alumni: p.alumni, phone: p.phone,
+        category: p.category, base_point: p.base_point,
+        performance_index: p.performance_index,
+        owner: p.owner, final_bid: p.final_bid
+      })),
+      clubs: Object.fromEntries(Object.keys(state.clubs).map(k => [
+        k,
+        { name: state.clubs[k].name, budgetLeft: state.clubs[k].budgetLeft, won: [...state.clubs[k].won] }
+      ])),
+      activeId: state.activeId || null
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(out));
+  } catch (e) { console.warn("saveState failed:", e); }
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    // quick sanity checks
+    if (!s || !Array.isArray(s.players) || !s.clubs) return null;
+    return s;
+  } catch (e) {
+    console.warn("loadState failed:", e);
+    return null;
+  }
+}
+
+function applyLoadedState(s) {
+  try {
+    state.loggedIn = !!s.loggedIn;
+    state.squadSize = s.squadSize || 15;
+    state.totalPoints = s.totalPoints || 15000;
+
+    // rebuild clubs shell from canonical club list, then apply saved budgets & won
+    Object.keys(state.clubs).forEach(c => {
+      state.clubs[c].budgetLeft = (s.clubs[c]?.budgetLeft ?? state.totalPoints);
+      state.clubs[c].won = Array.isArray(s.clubs[c]?.won) ? [...s.clubs[c].won] : [];
+    });
+
+    // restore players array
+    state.players = s.players.map(p => ({ ...p }));
+
+    // restore active selection if still valid
+    state.activeId = s.activeId && state.players.find(x => x.id === s.activeId) ? s.activeId : null;
+
+  } catch (e) {
+    console.warn("applyLoadedState failed:", e);
+  }
+}
+
   function populateOtherClubSelect() {
     selOtherClub.innerHTML = "";
     selOtherClub.appendChild(
@@ -121,15 +183,14 @@
 
   // ---------- auth ----------
   btnLogin.addEventListener("click", () => {
-    if (loginPass.value.trim() !== "sandeep") {
-      alert("Wrong password. (Hint: sandeep)");
-      return;
-    }
-    state.loggedIn = true;
-    loginCard.style.display = "none";
-    settingsCard.style.display = "block";
-    populateOtherClubSelect();
-  });
+  if (loginPass.value.trim() !== "sandeep") { alert("Wrong password. (Hint: sandeep)"); return; }
+  state.loggedIn = true;
+  loginCard.style.display = "none";
+  settingsCard.style.display = "block";
+  populateOtherClubSelect();
+  saveState();                 // <-- add this
+});
+
 
   // ---------- CSV load ----------
   btnLoadCsv.addEventListener("click", async () => {
@@ -223,38 +284,53 @@
   });
   search.addEventListener("input", renderPlayers);
 
-  function renderPlayers() {
-    const q = search.value.trim().toLowerCase();
-    const remain = state.players.filter(
-      p =>
-        !p.owner &&
-        (p.name.toLowerCase().includes(q) || p.alumni.toLowerCase().includes(q))
-    );
-    playersList.innerHTML = "";
-    remain.forEach(p => {
-      const catLabel = (p.category || "").toUpperCase();
-      const row = el("div", { class: "li selectable", onclick: () => setActive(p.id) }, [
-        el("div", {}, [
-          el("div", {}, [document.createTextNode(p.name || "(no name)")]),
-          el("div", { class: "tiny muted" }, [document.createTextNode((p.alumni || "").toString())])
-        ]),
-        el("div", { class: "right" }, [
-          el("div", { class: "pill" }, [document.createTextNode(`${catLabel} • base ${p.base_point}`)]),
-          el("div", { class: "flex", style: "margin-top:6px;" }, [
-            el("button", {
-              class: "btn",
-              onclick: (ev) => { ev.stopPropagation(); setActive(p.id); }
-            }, [document.createTextNode("Pick")])
-          ])
+ function renderPlayers() {
+  const q = search.value.trim().toLowerCase();
+  const remainAll = state.players.filter(p => !p.owner && (p.name.toLowerCase().includes(q) || p.alumni.toLowerCase().includes(q)));
+
+  const MAX_VISIBLE = 3;
+  const remain = remainAll.slice(0, MAX_VISIBLE);
+  const hiddenCount = Math.max(0, remainAll.length - remain.length);
+
+  playersList.innerHTML = "";
+
+  remain.forEach(p => {
+    const catLabel = (p.category || "").toUpperCase();
+    const row = el("div", { class: "li selectable", onclick: () => setActive(p.id) }, [
+      el("div", {}, [
+        el("div", {}, [document.createTextNode(p.name || "(no name)")]),
+        el("div", { class: "tiny muted" }, [document.createTextNode((p.alumni || "").toString())])
+      ]),
+      el("div", { class: "right" }, [
+        el("div", { class: "pill" }, [document.createTextNode(`${catLabel} • base ${p.base_point}`)]),
+        el("div", { class: "flex", style: "margin-top:6px;" }, [
+          el("button", {
+            class: "btn",
+            onclick: (ev) => { ev.stopPropagation(); setActive(p.id); }
+          }, [document.createTextNode("Pick")])
         ])
-      ]);
-      if (p.id === state.activeId) row.classList.add("active");
-      playersList.appendChild(row);
-    });
-    if (!remain.length) {
-      playersList.appendChild(el("div", { class: "li" }, [document.createTextNode("No remaining players match your search.")]));
-    }
+      ])
+    ]);
+    if (p.id === state.activeId) row.classList.add("active");
+    playersList.appendChild(row);
+  });
+
+  if (hiddenCount > 0) {
+    playersList.appendChild(
+      el("div", { class: "li" }, [
+        el("div", { class: "tiny muted" }, [
+          document.createTextNode(`…and ${hiddenCount} more not shown`)
+        ])
+      ])
+    );
   }
+
+  if (!remainAll.length) {
+    playersList.appendChild(
+      el("div", { class: "li" }, [document.createTextNode("No remaining players match your search.")])
+    );
+  }
+}
 
   function setActive(id) {
     state.activeId = id;
