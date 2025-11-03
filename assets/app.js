@@ -398,25 +398,52 @@
 
   // === Other clubs live cards ===============================================
   function renderOtherClubs() {
-    otherClubs.innerHTML = "";
-    CLUB_NAMES.filter(c => c!==MY_CLUB).forEach(c => {
-      const club = state.clubs[c];
-      const have = club.won.length;
+  otherClubs.innerHTML = "";
 
-      const list = el("div", {class:"list"});
-      club.won.slice().reverse().forEach(pid => {
-        const p = state.players.find(x=>x.id===pid); if (!p) return;
-        list.appendChild(el("div", {class:"li"}, [
+  // Show each club in its own card, same visual structure as HRB Selected Squad
+  CLUB_NAMES.filter(c => c !== MY_CLUB).forEach(c => {
+    const club = state.clubs[c];
+    const have = club.won.length;
+    const leftSlots = state.squadSize - have;
+
+    // Build the minimal player list (same as HRB list style)
+    const list = el("div", { class: "list" });
+    club.won.slice().reverse().forEach(pid => {
+      const p = state.players.find(x => x.id === pid);
+      if (!p) return;
+
+      list.appendChild(
+        el("div", { class: "li" }, [
           el("div", {}, [
             el("div", {}, [document.createTextNode(p.name)]),
-            el("div", {class:"tiny muted"}, [document.createTextNode(`${p.alumni||''}  • ${p.phone||''}`)])
+            el("div", { class: "tiny muted" }, [
+              document.createTextNode(`${p.alumni || ""}  • ${p.phone || ""}`)
+            ])
           ]),
-          el("div", {class:"right"}, [
-            el("span", {class:"pill"}, [document.createTextNode(`${(p.category||'').toUpperCase()}`)]),
-            el("div", {class:"tiny muted"}, [document.createTextNode(`${p.final_bid}`)])
+          el("div", { class: "right" }, [
+            el("span", { class: "pill" }, [
+              document.createTextNode(`${(p.category || "").toUpperCase()}`)
+            ]),
+            el("div", { class: "tiny muted" }, [
+              document.createTextNode(`Bid: ${p.final_bid}`)
+            ])
           ])
-        ]));
-      });
+        ])
+      );
+    });
+
+    // Header matches HRB card style: title on left, tiny status on right
+    const header = el("div", { class: "titlebar" }, [
+      el("div", {}, [document.createTextNode(c)]),
+      el("div", { class: "titlebar-right" }, [
+        document.createTextNode(`Players ${have}/${state.squadSize} • Points Left ${club.budgetLeft}`)
+      ])
+    ]);
+
+    const card = el("div", { class: "card stack" }, [header, list]);
+    otherClubs.appendChild(card);
+  });
+}
 
       const card = el("div", {class:"card stack"}, [
         el("div", {class:"titlebar"}, [
