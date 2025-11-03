@@ -383,15 +383,6 @@ function markWon(playerId, price){
   const p=(state.players||[]).find(x=>x.id===playerId); if(!p) return;
   const bid=Number(price);
   if(!Number.isFinite(bid) || bid<minBase()){ alert("Please enter a valid bid ≥ "+minBase()+"."); return; }
-  const base = toNum(p.base_point, minBase());
-  const msgs=[];
-  if(bid < base){ msgs.push("Below base point ("+base+")."); }
-  if(!guardrailOK(bid)){ const floor=minBase()*Math.max(0, remainingSlots()-1); msgs.push("Guardrail risk — keep ≥ "+floor+" for remaining slots."); }
-  if(msgs.length){ if(!confirm("⚠️ "+msgs.join(" ")+" Proceed anyway?")) return; }
-  pushHistory("markWon");
-  p.status="won"; p.finalBid=bid; p.owner=state.myClubSlug;
-  recomputeBudgetsFromWins(); persist(); render();
-}
   if(!guardrailOK(bid)){ alert("Guardrail violated. Reduce bid."); return; }
   pushHistory("markWon");
   p.status="won"; p.finalBid=bid; p.owner=state.myClubSlug;
@@ -401,16 +392,6 @@ function markWon(playerId, price){
 function assignToClubByNameOrSlug(playerId, clubText, price){
   const clubs=state.clubs||[]; let club=clubs.find(c=>c.slug===clubText);
   if(!club){ const t=String(clubText||"").trim().toLowerCase(); club=clubs.find(c=>(c.name||"").toLowerCase()===t)||clubs.find(c=>(c.name||"").toLowerCase().startsWith(t)); }
-  const msg=$("passPanelMsg"); if(!club){ if(msg) msg.textContent="Pick a valid club from the list."; return; }
-  const p=(state.players||[]).find(x=>x.id===playerId); if(!p) return;
-  const bid=Number(price); const min=minBase();
-  if(!Number.isFinite(bid) || bid<min){ if(msg) msg.textContent="Enter a valid final bid ≥ "+min+"."; return; }
-  const base = toNum(p.base_point, min);
-  if(bid < base){ const ok = confirm("⚠️ Below base point ("+base+"). Proceed?"); if(!ok) return; }
-  pushHistory("assignToClub");
-  p.status="won"; p.finalBid=bid; p.owner=club.slug;
-  recomputeBudgetsFromWins(); persist(); render();
-}
   const msg=$("passPanelMsg"); if(!club){ if(msg) msg.textContent="Pick a valid club from the list."; return; }
   const p=(state.players||[]).find(x=>x.id===playerId); if(!p) return;
   const bid=Number(price); const min=minBase();
@@ -537,31 +518,19 @@ function renderLiveBid(){
           <input id="bidInput" type="number" min="200" placeholder="e.g. ${cap}" />
         </label>
         <div class="hint">Suggested Max: <b>${cap}</b></div>
-        <button id="btn-mark-won" class="btn">HRB Won</button>
+        <button id="btn-mark-won" class="btn" disabled>HRB Won</button>
         <button id="btn-pass" class="btn btn-ghost">Pass / Assign</button>
       </div>
       <div id="bidWarn" class="hint" style="margin-top:6px;color:#dc2626"></div>
     </div>`;
-  
-const bidEl=$("bidInput"), wonBtn=$("btn-mark-won"), warnEl=$("bidWarn");
+  const bidEl=$("bidInput"), wonBtn=$("btn-mark-won"), warnEl=$("bidWarn");
   const validate=()=>{
-    const raw=bidEl.value;
-    if(!raw||!String(raw).trim().length){ warnEl.textContent="Enter a bid (≥ "+minBase()+")."; return false; }
-    const price=Number(raw);
-    if(!Number.isFinite(price)||price<minBase()){ warnEl.textContent="Enter a bid (≥ "+minBase()+")."; return false; }
-    const base = toNum(p.base_point, minBase());
-    const parts=[];
-    if(price < base) parts.push(`Below base point (${base}).`);
-    if(!guardrailOK(price)){
-      const floor = minBase() * Math.max(0, remainingSlots()-1);
-      parts.push(`Guardrail risk — keep ≥ ${floor} for remaining slots.`);
-    }
-    warnEl.textContent = parts.join(" ");
-    return true;
-  };
+    const raw=bidEl.value; if(!raw||!String(raw).trim().length){ warnEl.textContent="Enter a bid (≥ "+minBase()+")."; wonBtn.disabled=true; return false; }
+    const price=Number(raw); if(!Number.isFinite(price)||price<minBase()){ warnEl.textContent="Enter a bid (≥ "+minBase()+")."; wonBtn.disabled=true; return false; }
+    const ok=guardrailOK(price); wonBtn.disabled=!ok; const floor=Math.max(0,(remainingSlots()-1)*minBase()); warnEl.textContent = ok?"":`Guardrail: keep ≥ ${floor} for remaining slots.`; return ok; };
   bidEl.addEventListener("input", ()=>{ validate(); renderInsights(p, Number(bidEl.value)||null); });
   validate();
-wonBtn.addEventListener("click", ()=>{ if(!validate()) return; markWon(p.id, Number(bidEl.value)); });
+  wonBtn.addEventListener("click", ()=>{ if(!validate()) return; markWon(p.id, Number(bidEl.value)); });
   $("btn-pass")?.addEventListener("click", ()=>{ const panel=$("passPanel"); if(!panel) return; panel.style.display="block"; panel.scrollIntoView({behavior:"smooth", block:"center"}); wirePassPanelForPlayer(p); });
   renderInsights(p, Number(bidEl.value)||null);
 }
