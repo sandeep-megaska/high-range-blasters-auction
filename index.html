@@ -62,10 +62,22 @@
 .advice.bad  { border-color:#fecaca; background:#fef2f2; }
 .advice.info { border-color:#e5e7eb; background:#fff; }
 #kRoleBox { transition: box-shadow .2s ease, border-color .2s ease; }
+    /* Dark wrapper (only the outer area + headings) */
+.wrap.theme-dark {
+  background: #000;      /* black wrapper bg */
+  color: #fff;           /* white wrapper text */
+}
+
+/* Keep cards readable (don’t inherit white text inside cards) */
+.wrap.theme-dark .card {
+  color: var(--text);    /* back to normal inside cards */
+}
+
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <div class="wrap theme-dark">
+
     <h1>HRB Auction Assist</h1>
 
     <!-- LOGIN -->
