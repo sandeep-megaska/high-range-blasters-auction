@@ -137,18 +137,44 @@
     </div>
 
     <!-- LIVE -->
-    <div id="liveCard" class="card stack" style="display:none;">
-      <div class="titlebar sticky-top">
-        <div class="kpi">
-          <div class="box"><div class="tiny muted">HRB Players</div><div class="n" id="kHrbPlayers">0/15</div></div>
-          <div class="box"><div class="tiny muted">HRB Points Left</div><div class="n" id="kHrbLeft">15000</div></div>
-          <div class="box"><div class="tiny muted">Guardrail (200 × remaining slots)</div><div class="n" id="kGuard">3000</div></div>
-        </div>
-        <div class="flex">
-          <button id="btnExportWon" class="btn">Export Won CSV</button>
-          <button id="btnLogout" class="btn">Logout</button>
+    <!-- LIVE (unchanged wrapper) -->
+<div id="liveCard" class="card stack" style="display:none;">
+
+  <!-- ✅ FIXED: Live top header (self-contained, all tags closed) -->
+  <div class="titlebar sticky-top">
+    <div class="kpi">
+      <div class="box">
+        <div class="tiny muted">HRB Players</div>
+        <div class="n" id="kHrbPlayers">0/15</div>
+      </div>
+      <div class="box">
+        <div class="tiny muted">HRB Points Left</div>
+        <div class="n" id="kHrbLeft">15000</div>
+      </div>
+      <div class="box">
+        <div class="tiny muted">Guardrail (200 × remaining slots)</div>
+        <div class="n" id="kGuard">3000</div>
+      </div>
+
+      <!-- ✅ Role KPI box (place it HERE, inside the kpi group) -->
+      <div class="box" id="kRoleBox">
+        <div class="tiny muted">Role Status (min)</div>
+        <div class="n" style="font-size:14px;">
+          WK: <b id="kWK">0</b>/2 • LHB: <b id="kLHB">0</b>/2 • BOWL: <b id="kBOWL">0</b>/8
         </div>
       </div>
+    </div>
+
+    <div class="flex">
+      <button id="btnExportWon" class="btn">Export Won CSV</button>
+      <button id="btnLogout" class="btn">Logout</button>
+    </div>
+  </div>
+
+  <!-- (keep everything else in LIVE exactly as before: capacityStrip, row with players/live bid/HRB squad, other clubs, etc.) -->
+
+</div>
+
 
       <!-- Top-category capacity strip -->
       <div id="capacityStrip" class="card stack highlight" style="margin-bottom:12px;">
