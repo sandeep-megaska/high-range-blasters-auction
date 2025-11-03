@@ -304,6 +304,78 @@ window.addEventListener("hrb:render",refreshForActive);
 if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",refreshForActive)}else{refreshForActive()}})();
 })();
 </script>
+<script>
+/* ===== HRB — Future Affordability Warning (base_point driven) ===== */
+(function(){
+  const toNum = (v,d=0)=>{ const n=Number(v); return Number.isFinite(n)?n:d; };
+  const getState = () => window.state || {};
+  const minBase = ()=>200;
+
+  function remainingSlots(){
+    const s=getState();
+    const cap = toNum(s.playersNeeded, 15);
+    const mine=(s.players||[]).filter(p=>p.owner===s.myClubSlug&&p.status==="won").length;
+    return Math.max(0, cap - mine);
+  }
+  function remainingBudget(slug){
+    const s=getState();
+    const c=(s.clubs||[]).find(c=>c.slug===slug);
+    return c?toNum(c.budget_left, c.starting_budget||0):0;
+  }
+  function median(vals){
+    if (!vals.length) return 0;
+    const a = vals.slice().sort((x,y)=>x-y);
+    const m = Math.floor(a.length/2);
+    return a.length%2 ? a[m] : Math.round((a[m-1]+a[m])/2);
+    }
+
+  function affordabilityCheck(){
+    const s=getState();
+    const remPts = remainingBudget(s.myClubSlug);
+    const slots  = remainingSlots();
+    const pool   = (s.players||[]).filter(p=>p.status!=="won");
+    if (!pool.length || slots<=0) return;
+
+    // Define "top players" as Cat 1–2 (or fallback to top 20% by base_point if cat missing)
+    let topPool = pool.filter(p => Number(p.category)<=2);
+    if (!topPool.length) {
+      const sorted = pool.slice().sort((a,b)=>toNum(b.base_point,minBase())-toNum(a.base_point,minBase()));
+      topPool = sorted.slice(0, Math.ceil(sorted.length*0.2));
+    }
+
+    const basesTop   = topPool.map(p=>toNum(p.base_point,minBase()));
+    const basesAll   = pool.map(p=>toNum(p.base_point,minBase()));
+    const medianTop  = median(basesTop) || median(basesAll) || minBase();
+    const avgPerSlot = Math.round(remPts / Math.max(1, slots));
+    // Estimate how many top players you can still afford at medianTop × 1.15 buffer
+    const bufferedTop = Math.round(medianTop * 1.15);
+    const affordableTopCount = Math.floor(remPts / bufferedTop);
+
+    // Warning conditions
+    const risk1 = avgPerSlot < medianTop;                   // average < median top base
+    const risk2 = affordableTopCount < Math.min(2, slots);  // can’t afford at least two top picks
+
+    if (risk1 || risk2) {
+      const msg = [
+        "⚠️ Affordability risk:",
+        `Remaining points: ${remPts} · Slots: ${slots}`,
+        `Median top base: ${medianTop} (buffered ~ ${bufferedTop})`,
+        `You can likely afford only ~${affordableTopCount} top picks at current balance.`,
+        `Tip: consider saving points for upcoming Cat-1/2 or bid below stretch on mid-tier players.`
+      ].join("\n");
+      console.warn(msg);
+      // If you want a visible notice:
+      // alert(msg);
+    }
+  }
+
+  // Hook after we actually win/assign (patched by the enforcer)
+  const _mw = window.markWon;
+  window.markWon = function(id, price){ const r = _mw.apply(this, arguments); try{ affordabilityCheck(); }catch(e){} return r; };
+  const _as = window.assignToClubByNameOrSlug;
+  window.assignToClubByNameOrSlug = function(){ const r = _as.apply(this, arguments); try{ affordabilityCheck(); }catch(e){} return r; };
+})();
+</script>
 
 </body>
 </html>
