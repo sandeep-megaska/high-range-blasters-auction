@@ -430,7 +430,20 @@
           ])
         ])
       );
-    );}
+    });
+
+    // Header matches HRB card style: title on left, tiny status on right
+    const header = el("div", { class: "titlebar" }, [
+      el("div", {}, [document.createTextNode(c)]),
+      el("div", { class: "titlebar-right" }, [
+        document.createTextNode(`Players ${have}/${state.squadSize} • Points Left ${club.budgetLeft}`)
+      ])
+    ]);
+
+    const card = el("div", { class: "card stack" }, [header, list]);
+    otherClubs.appendChild(card);
+  });
+}
 
     // Header matches HRB card style: title on left, tiny status on right
     const header = el("div", { class: "titlebar" }, [
