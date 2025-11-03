@@ -1,8 +1,8 @@
-/* HRB Auction Assist — Restored multi-club view + robust selection & assigning
-   - Enforces per-player base_point as the starting bid
+/* HRB Auction Assist — Clubs updated to your canonical list.
+   - Start bid >= player's base_point (1500/1000/500/200 by cat)
    - Guardrail: keep 200 × remaining_slots after any HRB win
-   - Top-category capacity strip (Cat1/2/3)
-   - Other Clubs live cards at bottom
+   - Top-category capacity strip
+   - Live snapshot for other clubs
 */
 
 (() => {
@@ -24,7 +24,23 @@
     return Number.isFinite(n) ? n : d;
   };
 
-  const Clubs = ["HRB","ALPHA","BRAVO","CHARLIE","DELTA","EAGLES","FALCONS","ROYALS"];
+  // === Clubs ================================================================
+  const MY_CLUB = "High Range Blasters";   // HRB
+  const MY_CLUB_SHORT = "HRB";
+
+  const DEFAULT_CLUBS = [
+    { name: "High Range Blasters",  slug: "high-range-blasters",  logo_url: "" },
+    { name: "Black Panthers",       slug: "black-panthers",       logo_url: "" },
+    { name: "White Elephants",      slug: "white-elephants",      logo_url: "" },
+    { name: "Kerala Tuskers",       slug: "kerala-tuskers",       logo_url: "" },
+    { name: "Warbow Wolverines",    slug: "warbow-wolverines",    logo_url: "" },
+    { name: "Venad Warriers",       slug: "venad-warriers",       logo_url: "" },
+    { name: "Thiruvalla Warriers",  slug: "thiruvalla-warriers",  logo_url: "" },
+    { name: "God's Own XI",         slug: "gods-own-xi",          logo_url: "" },
+  ];
+  const CLUB_NAMES = DEFAULT_CLUBS.map(c=>c.name);
+
+  // === Categories / base points ============================================
   const BaseByCategory = {
     "cat 1":1500,"cat1":1500,"1":1500,
     "cat 2":1000,"cat2":1000,"2":1000,
@@ -33,20 +49,20 @@
   };
   const TOURNAMENT_MIN_BASE = 200;
 
+  // === State ================================================================
   const state = {
     loggedIn:false,
     squadSize:15,
     totalPoints:15000,
     players:[],           // {id,name,alumni,phone,category,base_point,performance_index,owner,final_bid}
     activeId:null,
-    clubs: Object.fromEntries(Clubs.map(c => [c, { name:c, budgetLeft:15000, won:[] }]))
+    clubs: Object.fromEntries(CLUB_NAMES.map(c => [c, { name:c, budgetLeft:15000, won:[] }]))
   };
-
   function resetClubBudgets(total) {
-    Clubs.forEach(c => { state.clubs[c].budgetLeft = total; state.clubs[c].won = []; });
+    CLUB_NAMES.forEach(c => { state.clubs[c].budgetLeft = total; state.clubs[c].won = []; });
   }
 
-  // UI refs
+  // === UI refs ==============================================================
   const loginCard = $("#loginCard");
   const settingsCard = $("#settingsCard");
   const liveCard = $("#liveCard");
@@ -89,15 +105,25 @@
   const btnLogout = $("#btnLogout");
   const otherClubs = $("#otherClubs");
 
-  // auth
+  // Inject other-club options (excluding my club)
+  function populateOtherClubSelect() {
+    selOtherClub.innerHTML = "";
+    selOtherClub.appendChild(el("option", {value:""}, [document.createTextNode("Assign to other club…")]));
+    DEFAULT_CLUBS.filter(c=>c.name!==MY_CLUB).forEach(c=>{
+      selOtherClub.appendChild(el("option", {value:c.name}, [document.createTextNode(c.name)]));
+    });
+  }
+
+  // === Auth =================================================================
   btnLogin.addEventListener("click", () => {
     if (loginPass.value.trim() !== "sandeep") { alert("Wrong password. (Hint: sandeep)"); return; }
     state.loggedIn = true;
     loginCard.style.display = "none";
     settingsCard.style.display = "block";
+    populateOtherClubSelect();
   });
 
-  // CSV load
+  // === CSV load =============================================================
   btnLoadCsv.addEventListener("click", async () => {
     loadStatus.textContent = "Loading…";
     try {
@@ -167,7 +193,7 @@
     updateTopBar(); updateCapacity(); renderHRB(); renderOtherClubs();
   });
 
-  // list + search
+  // === List + search ========================================================
   btnClearSearch.addEventListener("click", () => { search.value = ""; renderPlayers(); });
   search.addEventListener("input", renderPlayers);
 
@@ -215,8 +241,8 @@
     if (activeRow) activeRow.classList.add('active');
   }
 
-  // bidding & guardrail
-  function remainingSlotsHRB() { return state.squadSize - state.clubs["HRB"].won.length; }
+  // === Bidding & guardrail ==================================================
+  function remainingSlotsHRB() { return state.squadSize - state.clubs[MY_CLUB].won.length; }
   function guardrailNow() { return TOURNAMENT_MIN_BASE * remainingSlotsHRB(); }
 
   function validateBid() {
@@ -234,7 +260,7 @@
 
     const slotsAfter = Math.max(0, remainingSlotsHRB() - 1);
     const mustKeep = TOURNAMENT_MIN_BASE * slotsAfter;
-    const leftIfWin = state.clubs["HRB"].budgetLeft - bid;
+    const leftIfWin = state.clubs[MY_CLUB].budgetLeft - bid;
 
     if (leftIfWin < mustKeep) {
       bidHint.innerHTML = `<span class="warn">Bid violates guardrail: after this win you'd keep ${leftIfWin}, but need ≥ ${mustKeep}.</span>`;
@@ -254,9 +280,9 @@
   function hrbWon(bid) {
     const p = state.players.find(x => x.id === state.activeId);
     if (!p) return;
-    p.owner = "HRB"; p.final_bid = bid;
-    state.clubs["HRB"].won.push(p.id);
-    state.clubs["HRB"].budgetLeft -= bid;
+    p.owner = MY_CLUB; p.final_bid = bid;
+    state.clubs[MY_CLUB].won.push(p.id);
+    state.clubs[MY_CLUB].budgetLeft -= bid;
     clearActive();
     refreshAll();
   }
@@ -277,19 +303,19 @@
     inpBid.value = ""; bidHint.textContent = "Select a player to begin.";
   }
 
-  btnHrbWon.addEventListener("click", () => {
+  $("#btnHrbWon").addEventListener("click", () => {
     const p = state.players.find(x => x.id === state.activeId);
     if (!p) return;
     const bid = toInt(inpBid.value, 0);
     if (bid < p.base_point) { alert(`Min starting bid is ${p.base_point}.`); return; }
     const slotsAfter = Math.max(0, remainingSlotsHRB() - 1);
     const mustKeep = TOURNAMENT_MIN_BASE * slotsAfter;
-    const leftIfWin = state.clubs["HRB"].budgetLeft - bid;
+    const leftIfWin = state.clubs[MY_CLUB].budgetLeft - bid;
     if (leftIfWin < mustKeep) { alert(`This breaks guardrail. Need ≥ ${mustKeep} left after the win.`); return; }
     hrbWon(bid);
   });
 
-  btnAssignOther.addEventListener("click", () => {
+  $("#btnAssignOther").addEventListener("click", () => {
     const p = state.players.find(x => x.id === state.activeId);
     if (!p) return;
     const bid = toInt(inpBid.value, 0);
@@ -304,9 +330,9 @@
     if (e.key === "Enter" && !btnHrbWon.disabled) btnHrbWon.click();
   });
 
-  // HRB panel + topbar
+  // === HRB panel + topbar ===================================================
   function renderHRB() {
-    const hrb = state.clubs["HRB"];
+    const hrb = state.clubs[MY_CLUB];
     hrbList.innerHTML = "";
     hrb.won.slice().reverse().forEach(pid => {
       const p = state.players.find(x=>x.id===pid);
@@ -327,7 +353,7 @@
   }
 
   function updateTopBar() {
-    const hrb = state.clubs["HRB"];
+    const hrb = state.clubs[MY_CLUB];
     const have = hrb.won.length;
     const leftSlots = state.squadSize - have;
     kHrbPlayers.textContent = `${have}/${state.squadSize}`;
@@ -335,9 +361,9 @@
     kGuard.textContent = TOURNAMENT_MIN_BASE * leftSlots;
   }
 
-  // capacity (Cat1/2/3)
+  // === Capacity (Cat1/2/3) ==================================================
   function updateCapacity() {
-    const hrb = state.clubs["HRB"];
+    const hrb = state.clubs[MY_CLUB];
     const leftSlots = remainingSlotsHRB();
     const remaining = state.players.filter(p => !p.owner);
     const catCount = { c1:0, c2:0, c3:0 };
@@ -370,15 +396,14 @@
     mixNote.innerHTML = `You can still target about <b>${r1}</b> × Cat-1, <b>${r2}</b> × Cat-2, <b>${r3}</b> × Cat-3 at base while preserving the guardrail.`;
   }
 
-  // Other clubs live cards
+  // === Other clubs live cards ===============================================
   function renderOtherClubs() {
     otherClubs.innerHTML = "";
-    Clubs.filter(c => c!=="HRB").forEach(c => {
+    CLUB_NAMES.filter(c => c!==MY_CLUB).forEach(c => {
       const club = state.clubs[c];
       const have = club.won.length;
-      const leftSlots = state.squadSize - have;
+
       const list = el("div", {class:"list"});
-      // minimal list of players
       club.won.slice().reverse().forEach(pid => {
         const p = state.players.find(x=>x.id===pid); if (!p) return;
         list.appendChild(el("div", {class:"li"}, [
@@ -407,7 +432,7 @@
     });
   }
 
-  // export
+  // === Export & logout =======================================================
   btnExportWon.addEventListener("click", () => {
     const header = ["Club","Player","Alumni","Phone","Category","FinalBid"];
     const lines = [header.join(",")];
@@ -421,14 +446,14 @@
     setTimeout(()=>URL.revokeObjectURL(url), 1200); a.remove();
   });
 
-  // logout
   btnLogout.addEventListener("click", () => location.reload());
 
-  // refresh helpers
+  // === Refresh helpers =======================================================
   function refreshAll() {
     renderPlayers(); renderHRB(); updateTopBar(); updateCapacity(); renderOtherClubs();
   }
 
   // initial
+  populateOtherClubSelect();
   renderPlayers(); renderHRB();
 })();
