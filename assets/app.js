@@ -249,14 +249,6 @@ function renderInsights(p, whatIf=null){
           ${whoPreselected.length ? whoPreselected.map(n=>`<div>• ${n}</div>`).join("") : `<div class="hint">No rival preselect found for this player.</div>`}
         </div>
       </div>
-      const health = remainingHealth();
-html += `
-  <div class="card" style="padding:10px;flex:1;min-width:240px;">
-    <div><b>Points Health</b></div>
-    <div class="hint">Remaining: ${health.remPts} · Avg/slot: ${Math.round(health.avgPerSlot)} · Median base: ${health.median}</div>
-    <div style="margin-top:4px;color:${health.color};"><b>${health.label}</b></div>
-  </div>`;
-
     </div>
   `;
 }
@@ -387,45 +379,29 @@ function undo(){
 function setActivePlayer(id){ state.activePlayerId=id||null; persist(); renderLiveBid(); }
 function getActivePlayer(){ return (state.players||[]).find(p=>p.id===state.activePlayerId)||null; }
 
-
-function validateBidAgainstBase(p, bidValue) {
-  const base = Number(p.base_point || 0);
-  const bid = Number(bidValue || 0);
-  if (!Number.isFinite(base) || base <= 0) return true;
-  return bid >= base;
-}
-
-// patch markWon()
-function markWon(playerId, price) {
-  const p = (state.players||[]).find(x => x.id===playerId);
-  if (!p) return;
-  const bid = Number(price);
-  if (!validateBidAgainstBase(p, bid)) {
-    alert(`⚠️ Bid cannot be less than base point (${p.base_point}).`);
-    return;
-  }
-  if (!guardrailOK(bid)) {
-    alert("Guardrail violated. Reduce bid.");
-    return;
-  }
+function markWon(playerId, price){
+  const p=(state.players||[]).find(x=>x.id===playerId); if(!p) return;
+  const bid=Number(price);
+  if(!Number.isFinite(bid) || bid<minBase()){ alert("Please enter a valid bid ≥ "+minBase()+"."); return; }
+  if(!guardrailOK(bid)){ alert("Guardrail violated. Reduce bid."); return; }
   pushHistory("markWon");
   p.status="won"; p.finalBid=bid; p.owner=state.myClubSlug;
   recomputeBudgetsFromWins(); persist(); render();
 }
 
-// patch assignToClubByNameOrSlug()
-function assignToClubByNameOrSlug(playerId, clubText, price) {
-  const p=(state.players||[]).find(x=>x.id===playerId);
-  const club=(state.clubs||[]).find(c=>c.slug===slugify(clubText)||c.name===clubText);
-  const bid=Number(price);
-  if (!validateBidAgainstBase(p, bid)) {
-    alert(`⚠️ Bid cannot be less than base point (${p.base_point}).`);
-    return;
-  }
+function assignToClubByNameOrSlug(playerId, clubText, price){
+  const clubs=state.clubs||[]; let club=clubs.find(c=>c.slug===clubText);
+  if(!club){ const t=String(clubText||"").trim().toLowerCase(); club=clubs.find(c=>(c.name||"").toLowerCase()===t)||clubs.find(c=>(c.name||"").toLowerCase().startsWith(t)); }
+  const msg=$("passPanelMsg"); if(!club){ if(msg) msg.textContent="Pick a valid club from the list."; return; }
+  const p=(state.players||[]).find(x=>x.id===playerId); if(!p) return;
+  const bid=Number(price); const min=minBase();
+  if(!Number.isFinite(bid) || bid<min){ if(msg) msg.textContent="Enter a valid final bid ≥ "+min+"."; return; }
   pushHistory("assignToClub");
   p.status="won"; p.finalBid=bid; p.owner=club.slug;
   recomputeBudgetsFromWins(); persist(); render();
-}/* ============= UI helpers ============= */
+}
+
+/* ============= UI helpers ============= */
 function miniRow(p){
   const alumni=p.alumni||"", phone=p.phone||"", sep=alumni&&phone?" · ":"";
   const price = (p.status==="won" && Number.isFinite(toNum(p.finalBid,null))) ? ` <span style="background:#111827;color:#fff;padding:2px 6px;border-radius:6px;margin-left:6px;">${toNum(p.finalBid,0)} pts</span>` : "";
