@@ -258,7 +258,7 @@ const skillRaw= iSkill!== -1 ? String(r[iSkill]).trim(): "";
             base_point,
             performance_index: iPI !== -1 ? toInt(r[iPI], 0) : 0,
             owner: "",
-            final_bid: 0
+            final_bid: 0,
              wk: wkRaw.toLowerCase(),
   batting_type: batRaw.toLowerCase(),
   skill: skillRaw.toLowerCase()
