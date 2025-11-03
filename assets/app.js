@@ -537,46 +537,63 @@ function applyLoadedState(s) {
 
   // ---------- other clubs (styled like HRB) ----------
   function renderOtherClubs() {
-    otherClubs.innerHTML = "";
-    CLUB_NAMES.filter(c => c !== MY_CLUB).forEach(c => {
-      const club = state.clubs[c];
-      const have = club.won.length;
+  otherClubs.innerHTML = "";
 
-      const list = el("div", { class: "list" });
-      club.won.slice().reverse().forEach(pid => {
-        const p = state.players.find(x => x.id === pid);
-        if (!p) return;
-        list.appendChild(
-          el("div", { class: "li" }, [
-            el("div", {}, [
-              el("div", {}, [document.createTextNode(p.name)]),
-              el("div", { class: "tiny muted" }, [
-                document.createTextNode(`${p.alumni || ""}  • ${p.phone || ""}`)
-              ])
-            ]),
-            el("div", { class: "right" }, [
-              el("span", { class: "pill" }, [
-                document.createTextNode(`${(p.category || "").toUpperCase()}`)
-              ]),
-              el("div", { class: "tiny muted" }, [
-                document.createTextNode(`Bid: ${p.final_bid}`)
-              ])
-            ])
-          ])
-        );
-      });
+  const totalPts = state.totalPoints; // same starting pool for every club
 
-      const header = el("div", { class: "titlebar" }, [
-        el("div", {}, [document.createTextNode(c)]),
-        el("div", { class: "titlebar-right" }, [
-          document.createTextNode(`Players ${have}/${state.squadSize} • Points Left ${club.budgetLeft}`)
+  CLUB_NAMES.filter(c => c !== MY_CLUB).forEach(c => {
+    const club = state.clubs[c];
+    const have = club.won.length;
+    const leftSlots = Math.max(0, state.squadSize - have);
+    const spent = Math.max(0, totalPts - club.budgetLeft);
+    const avgWin = have > 0 ? Math.round(spent / have) : 0;
+    const avgPerSlot = leftSlots > 0 ? Math.round(club.budgetLeft / leftSlots) : 0;
+
+    // ---- LAST 3 WINS CHIPS ----
+    const last3 = club.won.slice(-3).map(pid => state.players.find(x => x.id === pid)).filter(Boolean);
+    const chips = el("div", { class: "chips" });
+    last3.reverse().forEach(p => {
+      chips.appendChild(
+        el("div", { class: "chip" }, [
+          document.createTextNode(`${p.name} — ${p.final_bid}`)
         ])
-      ]);
-
-      const card = el("div", { class: "card stack" }, [header, list]);
-      otherClubs.appendChild(card);
+      );
     });
-  }
+
+    // ---- FULL PLAYER LIST (kept intact) ----
+    const list = el("div", { class: "list" });
+    club.won.slice().reverse().forEach(pid => {
+      const p = state.players.find(x => x.id === pid); if (!p) return;
+      list.appendChild(el("div", { class: "li" }, [
+        el("div", {}, [
+          el("div", {}, [document.createTextNode(p.name)]),
+          el("div", { class: "tiny muted" }, [
+            document.createTextNode(`${p.alumni || ""}  • ${p.phone || ""}`)
+          ])
+        ]),
+        el("div", { class: "right" }, [
+          el("span", { class: "pill" }, [document.createTextNode(`${(p.category || "").toUpperCase()}`)]),
+          el("div", { class: "tiny muted" }, [document.createTextNode(`Bid: ${p.final_bid}`)])
+        ])
+      ]));
+    });
+
+    // ---- HEADER + SUBHEADER ----
+    const header = el("div", { class: "titlebar" }, [
+      el("div", {}, [document.createTextNode(c)]),
+      el("div", { class: "titlebar-right" }, [
+        document.createTextNode(`Players ${have}/${state.squadSize} • Points Left ${club.budgetLeft} • Avg/slot ${avgPerSlot}`)
+      ])
+    ]);
+
+    const sub = el("div", { class: "titlebar-sub" }, [
+      document.createTextNode(`Spent ${spent} • Avg win ${avgWin}`)
+    ]);
+
+    const card = el("div", { class: "card stack" }, [header, sub, chips, list]);
+    otherClubs.appendChild(card);
+  });
+}
 
   // ---------- export & logout ----------
   btnExportWon.addEventListener("click", () => {
