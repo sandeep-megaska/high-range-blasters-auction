@@ -1,439 +1,92 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>HRB Auction Assist</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HRB Auction Assistant</title>
   <style>
-    :root { --bg:#f7fafc; --card:#fff; --muted:#6b7280; --line:#e5e7eb; }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--bg); color:#0f172a; }
-    .wrap { max-width:1200px; margin:0 auto; padding:18px; }
-    h2,h3 { margin:0 0 10px; }
-    .hint { color:var(--muted); font-size:12px; }
-    .btn { padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:#111827; color:#fff; cursor:pointer; }
-    .btn[disabled] { opacity:.5; cursor:not-allowed; }
-    .btn-ghost { background:#fff; color:#111827; }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; }
-    input, textarea, select { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; }
-    label { font-size:12px; color:#111827; display:block; margin:6px 0; }
-    .row { display:flex; gap:8px; align-items:center; }
-    .topbar { display:flex; gap:18px; align-items:center; background:var(--card); border:1px solid var(--line); padding:10px 12px; border-radius:12px; }
-    .topbar .stat { font-size:14px; }
-    .topbar .right { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; }
-    .main-grid { display:grid; grid-template-columns: 1.1fr 1fr 1fr; gap:14px; margin-top:14px; }
-    .players, .live, .squad { min-height:420px; }
-    .players .list { max-height:520px; overflow:auto; }
-    .typeahead { margin:8px 0 10px; position:relative; }
-    #startResults { position:absolute; left:0; right:0; top:100%; z-index:5; background:#fff; border:1px solid var(--line); border-radius:8px; display:none; max-height:220px; overflow:auto; }
-    #startResults .ta-item { padding:8px 10px; border-bottom:1px solid var(--line); cursor:pointer; }
-    #startResults .ta-item:hover { background:#f3f4f6; }
-    .clubs-grid { display:grid; grid-template-columns: repeat( auto-fit, minmax(260px, 1fr) ); gap:12px; }
-    .divider { height:1px; background:var(--line); margin:10px 0; }
-    #settingsView, #appMain { display:none; }
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:#0b1220; color:#e5e7eb; margin:0;}
+    header{padding:12px 16px; background:#0f172a; border-bottom:1px solid #1f2937; display:flex; align-items:center; gap:12px; position:sticky; top:0; z-index:10;}
+    .brand{font-weight:700; font-size:15px; letter-spacing:.4px}
+    main{padding:16px; display:grid; grid-template-columns: 360px 1fr; gap:16px;}
+    .card{background:#111827; border:1px solid #1f2937; border-radius:12px; padding:12px;}
+    .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+    .btn{background:#1f2937; color:#e5e7eb; border:1px solid #374151; padding:8px 10px; border-radius:10px; cursor:pointer}
+    .btn[disabled]{opacity:.5; cursor:not-allowed}
+    .btn-primary{background:#2563eb; border-color:#1d4ed8}
+    .pill{background:#0b1328; border:1px solid #1e2b45; padding:2px 8px; border-radius:999px; font-size:12px;}
+    .muted{color:#94a3b8; font-size:12px}
+    input, select{background:#0b1328; color:#e5e7eb; border:1px solid #1e2b45; border-radius:10px; padding:8px; outline:none}
+    #players{max-height:60vh; overflow:auto;}
+    .player{padding:8px; border-radius:8px; border:1px solid #1f2937; margin-bottom:6px; cursor:pointer}
+    .player.active{outline:2px solid #2563eb}
+    .grid2{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+    .warn{color:#f59e0b}
+    .err{color:#ef4444}
+    .ok{color:#10b981}
+    .timerbar{display:flex; gap:8px; align-items:center}
+    .timer{font-weight:700; padding:2px 8px; border-radius:8px; background:#0b1328; border:1px solid #1e2b45}
   </style>
 </head>
 <body>
-  <div class="wrap">
+  <header>
+    <div class="brand">HRB Auction Assistant</div>
+    <div id="roundStrip" class="pill">Round: <span id="roundNo">1</span></div>
+    <div class="timerbar">
+      <span class="pill">Timer</span>
+      <span id="timer" class="timer">00:00</span>
+      <button id="btn-timer-start" class="btn">Start</button>
+      <button id="btn-timer-stop" class="btn">Stop</button>
+      <button id="btn-timer-reset" class="btn">Reset</button>
+    </div>
+    <div style="flex:1"></div>
+    <button id="btn-undo" class="btn">Undo</button>
+  </header>
 
-    <!-- LOGIN -->
-    <section id="loginView" class="card" style="max-width:440px; margin:40px auto; padding:18px;">
-      <div class="row" style="gap:10px; margin-bottom:8px;">
-        <h2>HRB Auction Assist — Login</h2>
+  <main>
+    <section class="card">
+      <div class="row" style="justify-content:space-between">
+        <div><b>Players</b></div>
+        <div class="muted">Click to select</div>
       </div>
-      <div class="row" style="gap:12px;">
-        <label style="flex:1;">Username
-          <input id="loginUser" placeholder="HRB" />
-        </label>
-        <label style="flex:1;">Password
-          <input id="loginPass" type="password" placeholder="sandeep" />
-        </label>
-      </div>
-      <div class="row" style="margin-top:10px;">
-        <button id="btn-login" class="btn">Login</button>
-        <div id="loginError" class="hint" style="margin-left:8px;"></div>
-      </div>
+      <div id="players"></div>
     </section>
 
-    <!-- SETTINGS (pre-auction) -->
-    <section id="settingsView" class="card" style="padding:16px;">
-      <h2>Pre-Bid Settings</h2>
-      <div class="divider"></div>
+    <section class="card">
+      <div class="row" style="justify-content:space-between">
+        <div><b>Live Bid</b></div>
+        <div id="clubBudget" class="muted"></div>
+      </div>
 
-      <div class="row" style="gap:14px; flex-wrap:wrap;">
-        <label style="flex:1; min-width:180px;">Players cap
-          <input id="cfgPlayersCap" type="number" value="15" />
+      <div id="activePlayerCard" class="muted" style="margin-bottom:8px;">Select a player…</div>
+
+      <div class="grid2">
+        <label>Bid
+          <input id="bidInput" type="number" min="200" step="50" value="200" style="width:100%">
         </label>
-        <label style="flex:1; min-width:220px;">Total points (per club)
-          <input id="cfgTotalPoints" type="number" value="15000" />
-        </label>
-        <label style="flex:1; min-width:200px;">Guardrail min base per slot
-          <input id="cfgGuardMin" type="number" value="200" />
+        <label>Assign to
+          <select id="otherClubSelect" style="width:100%"></select>
         </label>
       </div>
 
-      <h3 style="margin-top:14px;">HRB Pre-selected player(s)</h3>
-      <div class="row" style="gap:10px; flex-wrap:wrap;">
-        <label style="flex:2; min-width:240px;">Names and prices (e.g. <i>Name1=1200; Name2=900</i>)
-          <input id="cfgPreName" placeholder="John WK=1200; Anil LHB=900" />
-        </label>
-        <label style="flex:1; min-width:160px;">Single bid (used only if above has one name without “=price”)
-          <input id="cfgPreBid" type="number" placeholder="900" />
-        </label>
-        <div class="row" style="align-items:flex-end;">
-          <div class="hint">Available after preselected (HRB): <b id="cfgAvailableScore">15000</b></div>
-        </div>
+      <div id="bidWarn" class="warn" style="min-height:20px;margin-top:6px;"></div>
+
+      <div class="row" style="margin-top:8px">
+        <button id="btn-mark-won" class="btn btn-primary" disabled>HRB Won</button>
+        <button id="btn-assign" class="btn">Assign to other club</button>
+        <button id="btn-next" class="btn">Next Player</button>
       </div>
 
-      <h3 style="margin-top:14px;">Import players (CSV)</h3>
-      <div class="row" style="gap:10px; flex-wrap:wrap;">
-        <label style="flex:2; min-width:260px;">CSV URL (published to web; output=csv)
-          <input id="csvUrl" placeholder="https://docs.google.com/spreadsheets/.../pub?output=csv" />
-        </label>
-        <div class="row" style="gap:8px; align-items:flex-end;">
-          <button id="btn-fetch" class="btn">Fetch</button>
-          <button id="btn-clear-url" class="btn btn-ghost">Clear</button>
-        </div>
-      </div>
-      <label style="margin-top:8px;">Or paste CSV here
-        <textarea id="csvPaste" rows="6" placeholder="Use HRB_Auction_Master_Template.csv headers"></textarea>
-      </label>
-      <div class="row" style="margin-top:8px;">
-        <button id="btn-import" class="btn">Import Players</button>
-        <button id="btn-clear-paste" class="btn btn-ghost">Clear Paste</button>
-        <button id="btn-download-template" class="btn btn-ghost">Download CSV Template</button>
-        <div id="importMsg" class="hint" style="margin-left:8px;"></div>
-      </div>
+      <hr style="border-color:#1f2937; margin:12px 0">
 
-      <h3 style="margin-top:18px;">Per-club preselected players</h3>
-      <div id="clubPreselectedPanel" class="card" style="padding:12px;"></div>
-
-      <div class="divider"></div>
-      <div class="row" style="margin-top:8px;">
-        <button id="btn-save-settings" class="btn">Save & Go to Auction</button>
-        <div id="settingsError" class="hint" style="margin-left:8px;"></div>
+      <div class="row">
+        <div class="pill">Constraints: WK 2 · LHB 2 · Bowl 8</div>
+        <div id="health" class="muted"></div>
       </div>
+      <div id="insights" class="muted" style="margin-top:8px"></div>
     </section>
+  </main>
 
-    <!-- APP (auction) -->
-    <section id="appMain">
-      <div class="topbar">
-        <div class="stat">Remaining Points: <b id="remainingPoints">0</b></div>
-<div class="stat">Remaining Slots: <b id="remainingSlots">0</b></div>
-<div class="stat" id="guardrail">Guardrail (min per slot): <b>200</b></div>
-
-
-<!-- NEW: Round + Timer strip -->
-<div class="stat" style="margin-left:18px;">
-Round: <b id="roundNo">1</b>
-</div>
-<div class="stat">Timer: <b id="timerDisplay">00:45</b></div>
-
-
-<div class="right">
-<!-- NEW: timer controls -->
-<button id="btn-timer-start" class="btn btn-ghost">Start</button>
-<button id="btn-timer-pause" class="btn btn-ghost">Pause</button>
-<button id="btn-timer-reset" class="btn btn-ghost">Reset</button>
-<button id="btn-next-round" class="btn btn-ghost">Next Round</button>
-
-
-<!-- NEW: Undo -->
-<button id="btn-undo" class="btn btn-ghost" title="Undo last win/assign">Undo</button>
-
-
-<button id="btn-export" class="btn btn-ghost">Export Won (CSV)</button>
-<button id="btn-export-state" class="btn btn-ghost">Export All Players (CSV)</button>
-<button id="btn-logout" class="btn btn-ghost">Logout</button>
-</div>
-      </div>
-
-      <div id="complianceBar" class="row" style="margin:10px 0 0;"></div>
-
-      <div class="main-grid">
-        <!-- LEFT: Players & search -->
-        <div class="players card" style="padding:12px;">
-          <h3>Players <span id="playersCount" class="hint">(0)</span></h3>
-          <div class="typeahead">
-            <label>Find player by name (as announced on TV)</label>
-            <input id="startName" placeholder="Start typing a name…" autocomplete="off" />
-            <div id="startResults"></div>
-          </div>
-          <div class="row" style="gap:8px;">
-            <label style="flex:1;">Seed / Base Value
-              <input id="seedBase" disabled placeholder="auto" />
-            </label>
-            <button id="btn-start-bid" class="btn" style="align-self:flex-end;">Set Active</button>
-          </div>
-          <div class="divider"></div>
-          <div id="playersList" class="list"></div>
-        </div>
-
-        <!-- MIDDLE: Live Bid -->
-        <div class="live card" style="padding:12px;">
-          <h3>Live Bid</h3>
-          <div id="liveBid" style="margin-top:8px;"></div>
-
-          <!-- Predictive Insights -->
-          <div id="insightsPanel" class="card" style="margin-top:12px; padding:12px;">
-            <div class="row" style="justify-content:space-between; align-items:center;">
-              <h3 style="margin:0;">Live Insights</h3>
-              <div class="row" style="gap:8px;">
-                <label style="min-width:160px;">What-if bid
-                  <input id="whatIfBid" type="number" placeholder="Try a number…" />
-                </label>
-                <button id="btn-apply-whatif" class="btn btn-ghost" style="align-self:flex-end;">Apply What-if</button>
-              </div>
-            </div>
-            <div id="insightsContent" style="margin-top:8px; font-size:13px;"></div>
-          </div>
-
-          <div id="passPanel" class="card" style="margin-top:12px; padding:12px; display:none;">
-            <div class="row" style="justify-content:space-between;">
-              <div><b>Assign to another club</b></div>
-            </div>
-            <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:8px;">
-              <label style="flex:2; min-width:220px;">Club
-                <input id="passClubInput" list="clubNames" placeholder="Type or pick a club…" />
-                <datalist id="clubNames"></datalist>
-              </label>
-              <label style="flex:1; min-width:140px;">Final Bid
-                <input id="passBidAmount" type="number" min="200" placeholder="900" />
-              </label>
-              <button id="btn-assign-to-club" class="btn" style="align-self:flex-end;">Assign</button>
-            </div>
-            <div id="passPanelMsg" class="hint" style="margin-top:6px;"></div>
-          </div>
-        </div>
-
-        <!-- RIGHT: HRB Squad -->
-        <div class="squad card" style="padding:12px;">
-          <h3>HRB Selected Squad</h3>
-          <div id="selectedList" style="margin-top:6px;"></div>
-        </div>
-      </div>
-
-      <div style="margin-top:14px;">
-        <h3>Other Clubs</h3>
-        <div id="otherClubsPanel" class="clubs-grid"></div>
-      </div>
-    </section>
-  </div>
-
-  <!-- Single script include; keep the filename exactly as assets/app.js -->
-  <script defer src="./assets/app.js"></script>
-  <script>
-/* ===== Points Economy Enforcer (inline) ===== */
-(function(){if(!window||!document)return;const $=id=>document.getElementById(id);
-const toNum=(v,d=0)=>{const n=Number(v);return Number.isFinite(n)?n:d};
-const getState=()=>window.state||{};const minBase=()=>200;
-const getActivePlayer=()=>{const s=getState();const id=s.activePlayerId;
-if(id==null)return null;return(s.players||[]).find(p=>String(p.id)===String(id))||null};
-function minBidFor(p){return Math.max(minBase(),toNum(p&&p.base_point,minBase()))}
-function remainingSlots(){const s=getState();const cap=toNum(s.playersNeeded,15);
-const mine=(s.players||[]).filter(p=>p.owner===s.myClubSlug&&p.status==="won").length;
-return Math.max(0,cap-mine)}
-function remainingBudget(slug){const s=getState();
-const c=(s.clubs||[]).find(c=>c.slug===slug);return c?toNum(c.budget_left,c.starting_budget||0):0}
-function remainingFloor(excludeId=null,slotsOverride=null){const s=getState();
-const pool=(s.players||[]).filter(p=>p.status!=="won"&&(excludeId?String(p.id)!==String(excludeId):true));
-const k=Math.max(0,(slotsOverride==null?remainingSlots():slotsOverride));if(k<=0)return 0;
-const bases=pool.map(p=>minBidFor(p)).sort((a,b)=>a-b);let sum=0;
-for(let i=0;i<Math.min(k,bases.length);i++)sum+=bases[i];
-if(bases.length<k)sum+=(k-bases.length)*minBase();return sum}
-function validateBidAgainstBase(p,bidValue){const bid=Number(bidValue||0);if(!p)return false;return bid>=minBidFor(p)}
-window.guardrailOK=function(bid){const s=getState();const p=getActivePlayer();const price=Number(bid||0);
-if(!p||!Number.isFinite(price))return false;if(!validateBidAgainstBase(p,price))return false;
-const bud=remainingBudget(s.myClubSlug);const remSlotsAfter=Math.max(0,remainingSlots()-1);
-const floorAfter=remainingFloor(p.id,remSlotsAfter);return(price<=bud)&&((bud-price)>=floorAfter)}
-window.maxYouCanSpendNow=function(playerOpt){const s=getState();const p=playerOpt||getActivePlayer();
-const bud=remainingBudget(s.myClubSlug);const remSlotsAfter=Math.max(0,remainingSlots()-1);
-const floorAfter=remainingFloor(p&&p.id,remSlotsAfter);return Math.max(minBidFor(p||{}),bud-floorAfter)}
-const _markWon=window.markWon;window.markWon=function(playerId,price){const s=getState();
-const p=(s.players||[]).find(x=>x.id===playerId)||getActivePlayer();const bid=Number(price||0);
-if(!p){console.warn("[enforcer] no player");return}
-if(!validateBidAgainstBase(p,bid)){alert(`⚠️ Bid cannot be less than base point (${p.base_point}).`);return}
-if(!window.guardrailOK(bid)){alert("⚠️ Guardrail: this bid would leave insufficient points to fill remaining slots at base.");return}
-if(typeof _markWon==="function"){return _markWon(playerId,bid)}p.status="won";p.finalBid=bid;p.owner=s.myClubSlug;
-if(typeof window.recomputeBudgetsFromWins==="function")window.recomputeBudgetsFromWins();
-if(typeof window.persist==="function")window.persist();if(typeof window.render==="function")window.render()}
-const _assign=window.assignToClubByNameOrSlug;window.assignToClubByNameOrSlug=function(playerId,clubText,price){
-const s=getState();const p=(s.players||[]).find(x=>x.id===playerId)||getActivePlayer();const bid=Number(price||0);
-if(!p){console.warn("[enforcer] no player");return}
-if(!validateBidAgainstBase(p,bid)){alert(`⚠️ Bid cannot be less than base point (${p.base_point}).`);return}
-if(typeof _assign==="function"){return _assign(playerId,clubText,bid)}
-const club=(s.clubs||[]).find(c=>c.slug===String(clubText).toLowerCase().replace(/\s+/g,"-")||c.name===clubText);
-if(!club){alert("Club not found");return}p.status="won";p.finalBid=bid;p.owner=club.slug;
-if(typeof window.recomputeBudgetsFromWins==="function")window.recomputeBudgetsFromWins();
-if(typeof window.persist==="function")window.persist();if(typeof window.render==="function")window.render()}
-function attachButton(){const btn=document.getElementById("btn-mark-won");
-const bidInput=document.getElementById("bidInput");const warnEl=document.getElementById("bidWarn");
-const p=getActivePlayer();if(!btn||!bidInput)return;if(p)bidInput.min=String(minBidFor(p));
-function check(){const val=Number(bidInput.value||0);const player=getActivePlayer();if(!player)return;
-if(warnEl){if(!validateBidAgainstBase(player,val)){warnEl.textContent="Enter a bid ≥ base point: "+minBidFor(player)}
-else if(!window.guardrailOK(val)){warnEl.textContent="Guardrail: this bid would leave insufficient points to complete the squad."}
-else{warnEl.textContent=""}}}
-bidInput.addEventListener("input",check);btn.addEventListener("click",function(ev){ev.preventDefault();
-const player=getActivePlayer();if(!player)return;const val=Number(bidInput.value||0);
-if(!validateBidAgainstBase(player,val)){alert(`⚠️ Bid cannot be less than base point (${player.base_point}).`);return}
-if(!window.guardrailOK(val)){const maxNow=window.maxYouCanSpendNow(player);
-alert(`⚠️ Guardrail: reduce bid.\nYou can safely spend up to ${maxNow} now.`);return}
-window.markWon(player.id,val)},{passive:false})}
-if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",attachButton)}else{attachButton()}
-/* ===== UI sync helpers ===== */
-(function(){const $=id=>document.getElementById(id);const toNum=(v,d=0)=>{const n=Number(v);return Number.isFinite(n)?n:d};
-const getState=()=>window.state||{};const minBase=()=>200;function getActivePlayer(){const s=getState();
-const id=s.activePlayerId;if(id==null)return null;return(s.players||[]).find(p=>String(p.id)===String(id))||null}
-function minBidFor(p){return Math.max(minBase(),toNum(p&&p.base_point,minBase()))}
-const bidInput=$("bidInput");const btnWon=$("btn-mark-won");const warnEl=$("bidWarn");if(!bidInput||!btnWon)return;
-function runValidation(){const p=getActivePlayer();if(!p){btnWon.disabled=true;return}
-const val=Number(bidInput.value||0);let ok=true;if(val<minBidFor(p))ok=false;
-if(ok&&typeof window.guardrailOK==="function"){ok=!!window.guardrailOK(val)}
-btnWon.disabled=!ok;if(warnEl){if(val<minBidFor(p)){warnEl.textContent="Enter a bid ≥ base point: "+minBidFor(p)}
-else if(!ok){const maxNow=(typeof window.maxYouCanSpendNow==="function")?window.maxYouCanSpendNow(p):val;
-warnEl.textContent="Guardrail: reduce bid. You can safely spend up to "+maxNow+" now."}else{warnEl.textContent=""}}}
-function refreshForActive(){const p=getActivePlayer();if(!p){btnWon.disabled=true;if(warnEl)warnEl.textContent="Select a player to bid.";return}
-bidInput.min=String(minBidFor(p));const v=Number(bidInput.value||0);if(!Number.isFinite(v)||v<minBidFor(p)){bidInput.value=String(minBidFor(p))}
-runValidation()}
-bidInput.addEventListener("input",runValidation);const obs=new MutationObserver(()=>{refreshForActive()});
-obs.observe(document.body,{childList:true,subtree:true});window.addEventListener("hrb:active-player-changed",refreshForActive);
-window.addEventListener("hrb:render",refreshForActive);
-if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",refreshForActive)}else{refreshForActive()}})();
-})();
-</script>
-<script>
-/* ===== HRB — Future Affordability Warning (base_point driven) ===== */
-(function(){
-  const toNum = (v,d=0)=>{ const n=Number(v); return Number.isFinite(n)?n:d; };
-  const getState = () => window.state || {};
-  const minBase = ()=>200;
-
-  function remainingSlots(){
-    const s=getState();
-    const cap = toNum(s.playersNeeded, 15);
-    const mine=(s.players||[]).filter(p=>p.owner===s.myClubSlug&&p.status==="won").length;
-    return Math.max(0, cap - mine);
-  }
-  function remainingBudget(slug){
-    const s=getState();
-    const c=(s.clubs||[]).find(c=>c.slug===slug);
-    return c?toNum(c.budget_left, c.starting_budget||0):0;
-  }
-  function median(vals){
-    if (!vals.length) return 0;
-    const a = vals.slice().sort((x,y)=>x-y);
-    const m = Math.floor(a.length/2);
-    return a.length%2 ? a[m] : Math.round((a[m-1]+a[m])/2);
-    }
-
-  function affordabilityCheck(){
-    const s=getState();
-    const remPts = remainingBudget(s.myClubSlug);
-    const slots  = remainingSlots();
-    const pool   = (s.players||[]).filter(p=>p.status!=="won");
-    if (!pool.length || slots<=0) return;
-
-    // Define "top players" as Cat 1–2 (or fallback to top 20% by base_point if cat missing)
-    let topPool = pool.filter(p => Number(p.category)<=2);
-    if (!topPool.length) {
-      const sorted = pool.slice().sort((a,b)=>toNum(b.base_point,minBase())-toNum(a.base_point,minBase()));
-      topPool = sorted.slice(0, Math.ceil(sorted.length*0.2));
-    }
-
-    const basesTop   = topPool.map(p=>toNum(p.base_point,minBase()));
-    const basesAll   = pool.map(p=>toNum(p.base_point,minBase()));
-    const medianTop  = median(basesTop) || median(basesAll) || minBase();
-    const avgPerSlot = Math.round(remPts / Math.max(1, slots));
-    // Estimate how many top players you can still afford at medianTop × 1.15 buffer
-    const bufferedTop = Math.round(medianTop * 1.15);
-    const affordableTopCount = Math.floor(remPts / bufferedTop);
-
-    // Warning conditions
-    const risk1 = avgPerSlot < medianTop;                   // average < median top base
-    const risk2 = affordableTopCount < Math.min(2, slots);  // can’t afford at least two top picks
-
-    if (risk1 || risk2) {
-      const msg = [
-        "⚠️ Affordability risk:",
-        `Remaining points: ${remPts} · Slots: ${slots}`,
-        `Median top base: ${medianTop} (buffered ~ ${bufferedTop})`,
-        `You can likely afford only ~${affordableTopCount} top picks at current balance.`,
-        `Tip: consider saving points for upcoming Cat-1/2 or bid below stretch on mid-tier players.`
-      ].join("\n");
-      console.warn(msg);
-      // If you want a visible notice:
-      // alert(msg);
-    }
-  }
-
-  // Hook after we actually win/assign (patched by the enforcer)
-  const _mw = window.markWon;
-  window.markWon = function(id, price){ const r = _mw.apply(this, arguments); try{ affordabilityCheck(); }catch(e){} return r; };
-  const _as = window.assignToClubByNameOrSlug;
-  window.assignToClubByNameOrSlug = function(){ const r = _as.apply(this, arguments); try{ affordabilityCheck(); }catch(e){} return r; };
-})();
-</script>
-<script>
-/* ===== HRB — Hard Safety Net: never persist wins below base_point ===== */
-(function(){
-  const toNum=(v,d=0)=>{ const n=Number(v); return Number.isFinite(n)?n:d; };
-  const getState=()=>window.state||{};
-  const minBase=()=>200;
-  const playerBase = p => Math.max(minBase(), toNum(p && p.base_point, minBase()));
-
-  function enforceRosterIntegrity(opts={silent:false}) {
-    const s = getState();
-    const fixes = [];
-    (s.players||[]).forEach(p => {
-      if (p && p.status === "won") {
-        const base = playerBase(p);
-        const bid  = toNum(p.finalBid, 0);
-        // If anyone (HRB or other club) won below base, revert the win
-        if (bid < base) {
-          fixes.push({ name: p.name, bid, base, owner: p.owner });
-          // safest: revert the assignment and bid
-          p.status   = "open";
-          p.owner    = null;
-          p.finalBid = null;
-        }
-      }
-    });
-    if (fixes.length && !opts.silent) {
-      const lines = fixes.map(f => `• ${f.name}: bid ${f.bid} < base ${f.base} (owner: ${f.owner||"-"})`);
-      alert("⚠️ Invalid wins detected (below base_point).\nAll have been reverted.\n\n"+lines.join("\n"));
-    }
-    return fixes.length;
-  }
-
-  // Patch persist() to enforce before saving
-  const _persist = window.persist || function(){};
-  window.persist = function(){
-    try { enforceRosterIntegrity({silent:true}); } catch(e){}
-    return _persist.apply(this, arguments);
-  };
-
-  // Patch render() to enforce during any re-render too (silent to avoid loops)
-  const _render = window.render || function(){};
-  window.render = function(){
-    try { enforceRosterIntegrity({silent:true}); } catch(e){}
-    return _render.apply(this, arguments);
-  };
-
-  // Also check immediately after any win/assign click paths (generic delegation)
-  document.addEventListener("click", (ev)=>{
-    const t = ev.target.closest('[data-action="win"], [data-win], .btn-win, .js-win, #btn-mark-won');
-    const assign = ev.target.closest('[data-action="assign"], [data-assign], .btn-assign, .js-assign');
-    if (t || assign) {
-      // run right after the app's handler
-      setTimeout(()=>enforceRosterIntegrity({silent:false}), 0);
-    }
-  });
-
-  // Final boot-time sweep (silent)
-  tr
-
+  <script src="./app.js"></script>
 </body>
 </html>
