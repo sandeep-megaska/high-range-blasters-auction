@@ -1,874 +1,453 @@
-/* HRB Auction Assist – app.js (timer+round+undo) */
-const APP_BUILD = "hrb-2025-11-03-TIMER-ROUND-UNDO";
-console.log("[HRB] build:", APP_BUILD);
-if (window.__HRB_APP_LOADED__) { throw new Error("DUP_LOAD"); }
-window.__HRB_APP_LOADED__ = true;
+/* HRB Auction Assist – single-file logic focused on:
+   - Enforcing per-player base_point as the starting bid
+   - Guardrail: always keep 200 × remaining_slots after any HRB win
+   - Top-category capacity panel (Cat1/2/3 remaining & you-can-still-afford counts)
+   Author: You + ChatGPT, 2025-11-03
+*/
 
-/* ============= Constants ============= */
-const DEFAULT_PLAYERS_CAP = 15;
-const DEFAULT_TOTAL_POINTS = 15000;
-const DEFAULT_MIN_BASE = 200;           // tournament minimum (guardrail)
-const MUST_BID_THRESHOLD = 80;          // performance index threshold
+(() => {
 
-// weights for performance index (tune as needed)
-const PI_WEIGHTS = {
-  batting: 0.55,
-  bowling: 0.45,
-  bat_avg: 0.35,
-  strike_rate: 0.30,
-  runs: 0.35,
-  wickets: 0.55,
-  eco_rate: 0.45
-};
-
-/* 8 fixed clubs */
-const DEFAULT_CLUBS = [
-  { name: "High Range Blasters", slug: "high-range-blasters", logo_url: "" },
-  { name: "Black Panthers", slug: "black-panthers", logo_url: "" },
-  { name: "White Elephants", slug: "white-elephants", logo_url: "" },
-  { name: "Kerala Tuskers", slug: "kerala-tuskers", logo_url: "" },
-  { name: "Warbow Wolverines", slug: "warbow-wolverines", logo_url: "" },
-  { name: "Venad Warriers", slug: "venad-warriers", logo_url: "" },
-  { name: "Thiruvalla Warriers", slug: "thiruvalla-warriers", logo_url: "" },
-  { name: "God's Own XI", slug: "gods-own-xi", logo_url: "" },
-];
-
-/* ============= State ============= */
-let state = {
-  players: [],
-  auth: { loggedIn: false, user: null },
-  playersNeeded: DEFAULT_PLAYERS_CAP,
-  totalPoints: DEFAULT_TOTAL_POINTS,
-  minBasePerPlayer: DEFAULT_MIN_BASE,
-  categoryBase: { c1: null, c2: null, c3: null, c4: null, c5: null },
-  preselectedByClub: {},
-  myClubSlug: "high-range-blasters",
-  clubs: [],
-  activePlayerId: null,
-  // NEW: round + timer
-  roundNo: 1,
-  timer: { duration: 45, remaining: 45, running: false },
-  // NEW: history for undo
-  history: []
-};
-
-function persist(){ try{ localStorage.setItem("hrb-auction-state", JSON.stringify(state)); }catch{} }
-function load(){ try{ const s=JSON.parse(localStorage.getItem("hrb-auction-state")||"{}"); if(s&&typeof s==="object"){ state={...state,...s}; } }catch{} }
-
-/* ============= Utils ============= */
-const $ = (id)=>document.getElementById(id);
-const $$ = (sel,root=document)=>Array.from(root.querySelectorAll(sel));
-const toNum = (v,d=0)=>{ const n=Number(v); return Number.isFinite(n)?n:d; };
-const normalizeHeader = (s)=>String(s||"").trim().toLowerCase().replace(/\s+/g," ");
-const slugify = (s)=>String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/(^-|-$)/g,"");
-function minBase(){ return Number(state?.minBasePerPlayer)>0 ? Number(state.minBasePerPlayer) : DEFAULT_MIN_BASE; }
-function show(el,on=true){ if(!el) return; el.style.display = on?"block":"none"; }
-
-function availabilityIsBothDays(av){
-  const s = String(av||"").trim(); if(!s) return false;
-  if (/(both\s*days|two\s*days|day\s*1\s*and\s*day\s*2|sat\s*&\s*sun|saturday.*sunday)/i.test(s)) return true;
-  const dateLike = s.match(/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[^0-9]{0,5}\d{1,2}/gi);
-  if (dateLike && dateLike.length>=2) return true;
-  const tokens = s.split(/[^a-z0-9]+/i).filter(Boolean);
-  const hasMonth = tokens.some(t=>/(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(t));
-  const dayNums = tokens.filter(t=>/^\d{1,2}$/.test(t));
-  if (hasMonth && dayNums.length>=2) return true;
-  return false;
-}
-
-/* ============= Clubs ============= */
-function ensureDefaultClubsSeeded(){
-  if(!state.clubs) state.clubs=[];
-  const seen=new Set(state.clubs.map(c=>c.slug));
-  DEFAULT_CLUBS.forEach(def=>{
-    if(!seen.has(def.slug)){
-      const start = state.totalPoints || DEFAULT_TOTAL_POINTS;
-      state.clubs.push({ id:`local-${def.slug}`, slug:def.slug, name:def.name, logo_url:def.logo_url||"", starting_budget:start, budget_left:start });
-    }
-  });
-  recomputeBudgetsFromWins();
-  persist();
-}
-function myClub(){ return (state.clubs||[]).find(c=>c.slug===state.myClubSlug)||null; }
-function remainingSlots(){
-  const mine=(state.players||[]).filter(p=>p.owner===state.myClubSlug&&p.status==="won").length;
-  return Math.max(0,(state.playersNeeded||DEFAULT_PLAYERS_CAP)-mine);
-}
-function remainingBudget(slug){ const c=(state.clubs||[]).find(c=>c.slug===slug); return c?toNum(c.budget_left,c.starting_budget||0):0; }
-
-/* ============= Performance Index & Priority ============= */
-function clip01(x){ return Math.max(0, Math.min(1, x)); }
-function norm(value, min, max){ if(value==null||!Number.isFinite(Number(value))) return 0; const n=(Number(value)-min)/(max-min||1); return clip01(n); }
-function computePerformanceIndex(p){
-  if (p.performance_index!=null && p.performance_index!=="" && Number.isFinite(Number(p.performance_index))) {
-    const v = Number(p.performance_index); return Math.max(0, Math.min(100, v));
-  }
-  const bat = (
-    PI_WEIGHTS.bat_avg * norm(p.bat_avg, 10, 45) +
-    PI_WEIGHTS.strike_rate * norm(p.strike_rate, 70, 180) +
-    PI_WEIGHTS.runs * norm(p.runs, 100, 1200)
-  );
-  const bowl = (
-    PI_WEIGHTS.wickets * norm(p.wickets, 0, 50) +
-    PI_WEIGHTS.eco_rate * (1 - norm(p.eco_rate, 4.5, 9.5))
-  );
-  const pi = 100 * (PI_WEIGHTS.batting * bat + PI_WEIGHTS.bowling * bowl);
-  return Math.round(Math.max(0, Math.min(100, pi)));
-}
-function computeBidPriority(p){
-  const pi = computePerformanceIndex(p);
-  const fullAvail = availabilityIsBothDays(p.availability);
-  const wkBoost = isWK(p) ? 6 : 0;
-  const leftBoost = /left/i.test(String(p.batting_type||p.batting||"")) ? 4 : 0;
-  const roleAdj = /all/i.test(String(p.skill||"")) ? 1.05 : 1.0;
-  const base = pi + wkBoost + leftBoost + (fullAvail?8:-10);
-  return Math.round(Math.max(0, Math.min(120, base * roleAdj)));
-}
-function suggestedCap(p){
-  const budget = remainingBudget(state.myClubSlug);
-  const slots = Math.max(1, remainingSlots());
-  const avgPerSlot = budget / slots;
-  const priority = computeBidPriority(p);   // 0..120
-  const prioFactor = 0.6 + (priority/120)*0.9; // 0.6..1.5
-  const basePoint = toNum(p.base_point, toNum(p.base, minBase()));
-  const baseFactor = 1 + computePerformanceIndex(p)/200; // 1..1.5
-  const capByPriority = avgPerSlot * prioFactor;
-  const capByBase = basePoint * baseFactor;
-  const cap = Math.max(minBase(), Math.round(Math.min(capByPriority, capByBase)));
-  return cap;
-}
-
-/* ============= Predictive / Insights ============= */
-function guardrailOK(bid){
-  const rem=remainingSlots();
-  const floor=minBase();
-  const bud=remainingBudget(state.myClubSlug);
-  return bid<=bud && bud-bid>=(rem-1)*floor;
-}
-function maxYouCanSpendNow(){
-  const bud = remainingBudget(state.myClubSlug);
-  const floor = minBase() * Math.max(0, remainingSlots()-1);
-  return Math.max(minBase(), bud - floor);
-}
-function marketPulse(){
-  const rem=(state.players||[]).filter(p=>p.status!=="won");
-  const count = (list, pred)=>list.filter(pred).length;
-  const bowlers = count(rem, p=>/bowl/i.test(String(p.skill||""))||/all/i.test(String(p.skill||"")));
-  const wks = count(rem, p=>isWK(p));
-  const lefties = count(rem, p=>/left/i.test(String(p.batting_type||p.batting||"")));
-  const bothDays = count(rem, p=>availabilityIsBothDays(p.availability));
-  const cats = {
-    c1: count(rem, p=>toNum(p.category,null)===1),
-    c2: count(rem, p=>toNum(p.category,null)===2),
-    c3: count(rem, p=>toNum(p.category,null)===3),
-    c4: count(rem, p=>toNum(p.category,null)===4),
-    c5: count(rem, p=>toNum(p.category,null)===5)
+  // --- helpers --------------------------------------------------------------
+  const $ = sel => document.querySelector(sel);
+  const el = (tag, attrs={}, children=[]) => {
+    const n = document.createElement(tag);
+    Object.entries(attrs).forEach(([k,v]) => {
+      if (k === 'class') n.className = v;
+      else if (k === 'html') n.innerHTML = v;
+      else n.setAttribute(k, v);
+    });
+    children.forEach(c => n.appendChild(c));
+    return n;
   };
-  return { total: rem.length, bowlers, wks, lefties, bothDays, cats };
-}
-function threatClubs(){
-  return (state.clubs||[]).map(c=>{
-    const players=(state.players||[]).filter(p=>p.owner===c.slug&&p.status==="won").length;
-    const slots=Math.max(0,(state.playersNeeded||DEFAULT_PLAYERS_CAP)-players);
-    const perSlot = slots>0 ? (toNum(c.budget_left,0)/slots) : 0;
-    return { name:c.name, slug:c.slug, perSlot, budgetLeft:toNum(c.budget_left,0), slots };
-  }).sort((a,b)=>b.perSlot-a.perSlot).slice(0,3);
-}
-function winProbabilityHeuristic(p, bid){
-  const top=threatClubs();
-  const bench = top.reduce((s,c)=>s+c.perSlot,0)/(top.length||1);
-  const prio = computeBidPriority(p)/120; // 0..1
-  const ratio = (bid||0) / Math.max(1, bench);
-  const score = 0.35*ratio + 0.65*prio; // 0..~1.5
-  if (score>=1.05) return {label:"High", color:"#16a34a"};
-  if (score>=0.75) return {label:"Medium", color:"#f59e0b"};
-  return {label:"Low", color:"#dc2626"};
-}
-function renderInsights(p, whatIf=null){
-  const root=$("insightsContent"); if(!root) return;
-  if(!p){ root.innerHTML=`<div class="hint">Pick a player to see live insights.</div>`; return; }
-
-  const cap = suggestedCap(p);
-  const safe = Math.max(minBase(), Math.round(cap*0.85));
-  const stretch = Math.round(cap*1.15);
-  const hardCap = Math.round(maxYouCanSpendNow());
-
-  const bidForProb = toNum(whatIf, cap);
-  const winProb = winProbabilityHeuristic(p, bidForProb);
-
-  const pulse = marketPulse();
-  const threats = threatClubs();
-  const scarcity = [];
-  if (pulse.wks<=2) scarcity.push("Wicket-keepers scarce");
-  if (pulse.bowlers<=10) scarcity.push("Specialist bowlers running low");
-  if (pulse.lefties<=6) scarcity.push("Left-handers scarce");
-  if (pulse.bothDays <= Math.round(pulse.total*0.25)) scarcity.push("Two-day availability is rare");
-
-  const preMap = state.preselectedByClub || {};
-  const whoPreselected = Object.entries(preMap).filter(([slug,map])=>{
-    return map && typeof map==="object" && Object.keys(map).some(n=>n===String(p.name||"").toLowerCase());
-  }).map(([slug])=> (state.clubs||[]).find(c=>c.slug===slug)?.name).filter(Boolean);
-
-  root.innerHTML = `
-    <div class="row" style="flex-wrap:wrap; gap:10px;">
-      <div class="card" style="padding:10px; flex:1; min-width:220px;">
-        <div><b>Price band</b></div>
-        <div class="hint">Safe ~ Stretch ~ Hard Cap</div>
-        <div style="margin-top:4px; font-size:14px;">${safe} – ${stretch} (you can go up to <b>${hardCap}</b>)</div>
-      </div>
-      <div class="card" style="padding:10px; flex:1; min-width:220px;">
-        <div><b>Win probability</b></div>
-        <div class="hint">at bid = ${bidForProb}</div>
-        <div style="margin-top:4px; font-size:14px; color:${winProb.color}"><b>${winProb.label}</b></div>
-      </div>
-      <div class="card" style="padding:10px; flex:1; min-width:260px;">
-        <div><b>Threat clubs (budget/slot)</b></div>
-        <div style="margin-top:4px; font-size:13px;">
-          ${threats.map(t=>`<div>${t.name}: <b>${Math.round(t.perSlot)}</b> (left ${t.slots} slots, ${t.budgetLeft} pts)</div>`).join("") || "<div class='hint'>No threats</div>"}
-        </div>
-      </div>
-    </div>
-
-    <div class="row" style="flex-wrap:wrap; gap:10px; margin-top:10px;">
-      <div class="card" style="padding:10px; flex:1; min-width:240px;">
-        <div><b>Role & availability pulse</b></div>
-        <div class="hint">Remaining pool</div>
-        <div style="margin-top:4px; font-size:13px;">
-          WK: <b>${pulse.wks}</b> · Bowlers: <b>${pulse.bowlers}</b> · Left-handers: <b>${pulse.lefties}</b> · Both-days: <b>${pulse.bothDays}</b>
-        </div>
-      </div>
-      <div class="card" style="padding:10px; flex:1; min-width:240px;">
-        <div><b>Scarcity alerts</b></div>
-        <div style="margin-top:4px; font-size:13px;">
-          ${scarcity.length ? scarcity.map(s=>`<div>• ${s}</div>`).join("") : `<div class="hint">No strong scarcity signals yet.</div>`}
-        </div>
-      </div>
-      <div class="card" style="padding:10px; flex:1; min-width:240px;">
-        <div><b>Marked by rivals</b></div>
-        <div style="margin-top:4px; font-size:13px;">
-          ${whoPreselected.length ? whoPreselected.map(n=>`<div>• ${n}</div>`).join("") : `<div class="hint">No rival preselect found for this player.</div>`}
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-/* ============= CSV parsing / validation ============= */
-function splitCsv(text){ const rows=[],row=[],push=()=>rows.push(row.splice(0,row.length)); let cell="",inQ=false; for(let i=0;i<text.length;i++){ const ch=text[i],nx=text[i+1]; if(inQ){ if(ch==='"'&&nx=='"'){cell+='"';i++;continue;} if(ch=='"'){inQ=false;continue;} cell+=ch; continue;} if(ch=='"'){inQ=true;continue;} if(ch===','){row.push(cell);cell="";continue;} if(ch=='\n'){row.push(cell);cell="";push();continue;} cell+=ch;} row.push(cell); push(); return rows; }
-function parseCSVPlayers(raw){
-  const rows=splitCsv(raw).filter(r=>r.some(c=>String(c).trim()!=="")); if(!rows.length) return [];
-  const headerIdx = rows.findIndex(r=>{ const h=r.map(normalizeHeader); return h.includes("name") || h.includes("player name") || h.includes("player"); });
-  if(headerIdx<0) return [];
-  const header = rows[headerIdx].map(normalizeHeader); const body=rows.slice(headerIdx+1);
-  const idx=(...aliases)=>{ for(const a of aliases){ const i=header.indexOf(a); if(i>=0) return i; } return -1; };
-  const i = {
-    player_id: idx("player_id","id"),
-    name: idx("name","player name","player"),
-    alumni: idx("alumni","alumni member name","member","alumni name"),
-    phone: idx("phone","player contact number","mobile","whatsapp","contact"),
-    skill: idx("skill","playing role","role"),
-    batting_type: idx("batting_type","batting hand","batting"),
-    bowling_type: idx("bowling_type","bowling"),
-    wk: idx("wk","wicket-keeper","wicket keeper","keeper"),
-    availability: idx("availability"),
-    category: idx("category","cat"),
-    base_point: idx("base_point","base","base point"),
-    previous_team: idx("previous_team","represented teams","represented team"),
-    matches: idx("matches_played","matches","m"),
-    bat_avg: idx("bat_avg","batting avg","avg"),
-    strike_rate: idx("strike_rate","sr","strike rate"),
-    runs: idx("runs"),
-    fifties: idx("50s","fifties"),
-    hundreds: idx("100s","hundreds"),
-    not_outs: idx("not_outs","no"),
-    wickets: idx("wickets","wkts"),
-    eco_rate: idx("eco_rate","economy","econ"),
-    best_bowling: idx("best_bowling","bb"),
-    five_wkts: idx("five_wkts","5w"),
-    catches: idx("catches"),
-    runouts: idx("runouts","ro"),
-    performance_index: idx("performance_index"),
-    popularity_index: idx("popularity_index","votes"),
-    must_bid_flag: idx("must_bid_flag","must bid"),
-    availability_flag: idx("availability_flag"),
-    bid_priority_score: idx("bid_priority_score")
+  const csvToRows = (text) => {
+    // very simple CSV splitter (assumes no quoted commas in your dataset)
+    return text.trim().split(/\r?\n/).map(r => r.split(',').map(s => s.trim()));
   };
-  const required = ["name"]; // minimal requirement
-  const missing = required.filter(r=> idx(r)===-1 );
-  if (missing.length){ throw new Error("Missing required header(s): "+missing.join(", ")); }
+  const toInt = (v, d=0) => {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : d;
+  };
 
-  const players=[];
-  body.forEach((cols,idxRow)=>{
-    const name = (cols[i.name]||"").trim(); if(!name) return;
-    const p = {
-      id: (cols[i.player_id]||String(idxRow+1)).toString(),
-      name,
-      alumni: (cols[i.alumni]||"").trim(),
-      phone: (cols[i.phone]||"").trim(),
-      skill: (cols[i.skill]||"").trim(),
-      batting_type: (cols[i.batting_type]||"").trim(),
-      bowling_type: (cols[i.bowling_type]||"").trim(),
-      wk: String(cols[i.wk]||"").trim(),
-      availability: (cols[i.availability]||"").trim(),
-      category: toNum(cols[i.category], null),
-      base_point: toNum(cols[i.base_point], null),
-      previous_team: (cols[i.previous_team]||"").trim(),
-      matches_played: toNum(cols[i.matches], null),
-      bat_avg: toNum(cols[i.bat_avg], null),
-      strike_rate: toNum(cols[i.strike_rate], null),
-      runs: toNum(cols[i.runs], null),
-      fifty: toNum(cols[i.fifties], null),
-      hundred: toNum(cols[i.hundreds], null),
-      not_outs: toNum(cols[i.not_outs], null),
-      wickets: toNum(cols[i.wickets], null),
-      eco_rate: toNum(cols[i.eco_rate], null),
-      best_bowling: (cols[i.best_bowling]||"").trim(),
-      five_wkts: toNum(cols[i.five_wkts], null),
-      catches: toNum(cols[i.catches], null),
-      runouts: toNum(cols[i.runouts], null),
-      performance_index: toNum(cols[i.performance_index], null),
-      popularity_index: toNum(cols[i.popularity_index], null),
-      must_bid_flag: (cols[i.must_bid_flag]||"").trim(),
-      availability_flag: (cols[i.availability_flag]||"").trim(),
-      bid_priority_score: toNum(cols[i.bid_priority_score], null),
-      status: "new"
-    };
-    players.push(p);
-  });
-  return players;
-}
+  // --- app state ------------------------------------------------------------
+  const Clubs = ["HRB","ALPHA","BRAVO","CHARLIE","DELTA","EAGLES","FALCONS","ROYALS"];
+  const BaseByCategory = { "cat 1":1500, "cat1":1500, "1":1500,
+                           "cat 2":1000, "cat2":1000, "2":1000,
+                           "cat 3":500,  "cat3":500,  "3":500,
+                           "cat 4":200,  "cat4":200,  "4":200 };
+  const TOURNAMENT_MIN_BASE = 200;
 
-/* ============= Budgets & Guardrail ============= */
-function recomputeBudgetsFromWins(){
-  (state.clubs||[]).forEach(c=>{
-    const spent=(state.players||[]).filter(p=>p.owner===c.slug&&p.status==="won").reduce((s,p)=>s+toNum(p.finalBid,0),0);
-    c.starting_budget = state.totalPoints || DEFAULT_TOTAL_POINTS;
-    c.budget_left = Math.max(0, c.starting_budget - spent);
-  });
-}
+  const state = {
+    loggedIn:false,
+    squadSize:15,
+    totalPoints:15000,
+    players:[],           // {id,name,alumni,phone,category,base_point,performance_index,owner,final_bid}
+    activeId:null,
+    clubs: Object.fromEntries(Clubs.map(c => [c, { name:c, budgetLeft:15000, won:[] }])),
+  };
 
-/* ============= History (Undo) ============= */
-function pushHistory(tag){
-  try{
-    const snapshot = JSON.stringify({
-      tag: tag||"",
-      players: state.players,
-      clubs: state.clubs
-    });
-    state.history = state.history || [];
-    state.history.push(snapshot);
-    if(state.history.length>50) state.history.shift();
-    persist();
-  }catch(e){ console.warn("history push failed", e); }
-}
-function canUndo(){ return (state.history||[]).length>0; }
-function undo(){
-  if(!canUndo()) return;
-  const raw = state.history.pop();
-  try{
-    const snap = JSON.parse(raw||"{}");
-    state.players = JSON.parse(JSON.stringify(snap.players||[]));
-    state.clubs = JSON.parse(JSON.stringify(snap.clubs||[]));
-    recomputeBudgetsFromWins();
-    persist();
-    render();
-  }catch(e){ console.error("undo failed", e); }
-}
-
-/* ============= Live flow ============= */
-function setActivePlayer(id){ state.activePlayerId=id||null; persist(); renderLiveBid(); }
-function getActivePlayer(){ return (state.players||[]).find(p=>p.id===state.activePlayerId)||null; }
-
-function markWon(playerId, price){
-  const p=(state.players||[]).find(x=>x.id===playerId); if(!p) return;
-  const bid=Number(price);
-  if(!Number.isFinite(bid) || bid<minBase()){ alert("Please enter a valid bid ≥ "+minBase()+"."); return; }
-  if(!guardrailOK(bid)){ alert("Guardrail violated. Reduce bid."); return; }
-  pushHistory("markWon");
-  p.status="won"; p.finalBid=bid; p.owner=state.myClubSlug;
-  recomputeBudgetsFromWins(); persist(); render();
-}
-
-function assignToClubByNameOrSlug(playerId, clubText, price){
-  const clubs=state.clubs||[]; let club=clubs.find(c=>c.slug===clubText);
-  if(!club){ const t=String(clubText||"").trim().toLowerCase(); club=clubs.find(c=>(c.name||"").toLowerCase()===t)||clubs.find(c=>(c.name||"").toLowerCase().startsWith(t)); }
-  const msg=$("passPanelMsg"); if(!club){ if(msg) msg.textContent="Pick a valid club from the list."; return; }
-  const p=(state.players||[]).find(x=>x.id===playerId); if(!p) return;
-  const bid=Number(price); const min=minBase();
-  if(!Number.isFinite(bid) || bid<min){ if(msg) msg.textContent="Enter a valid final bid ≥ "+min+"."; return; }
-  pushHistory("assignToClub");
-  p.status="won"; p.finalBid=bid; p.owner=club.slug;
-  recomputeBudgetsFromWins(); persist(); render();
-}
-
-/* ============= UI helpers ============= */
-function miniRow(p){
-  const alumni=p.alumni||"", phone=p.phone||"", sep=alumni&&phone?" · ":"";
-  const price = (p.status==="won" && Number.isFinite(toNum(p.finalBid,null))) ? ` <span style="background:#111827;color:#fff;padding:2px 6px;border-radius:6px;margin-left:6px;">${toNum(p.finalBid,0)} pts</span>` : "";
-  return `
-  <div class="mini-row" style="padding:6px 0;border-bottom:1px solid #eef1f4">
-    <div style="font-size:14px;font-weight:700">${p.name||"-"}${price}</div>
-    <div style="font-size:12px;color:#6b7280">${alumni}${sep}${phone}</div>
-  </div>`;
-}
-function isLeftHand(hand){ return /left/i.test(String(hand||"")); }
-function isBowler(role){ return /bowl/i.test(String(role||"")); }
-function isWK(p){
-  const flag = String(p.wk||"").trim().toLowerCase();
-  const byFlag = flag==="y" || flag==="yes" || flag==="true" || flag==="1";
-  const byRole = /wk|wicket/i.test(String(p.skill||""));
-  return byFlag || byRole;
-}
-function complianceForMySquad(){
-  const mine=(state.players||[]).filter(p=>p.owner===state.myClubSlug&&p.status==="won");
-  const wk=mine.filter(p=>isWK(p)).length;
-  const lhb=mine.filter(p=>isLeftHand(p.batting_type||p.batting||"")).length;
-  const bowl=mine.filter(p=>isBowler(p.skill)||/all/i.test(String(p.skill||""))).length;
-  return { wk, lhb, bowl };
-}
-
-/* ============= Renderers ============= */
-function renderPlayersList(){
-  const root=$("playersList"), counter=$("playersCount"); if(!root) return;
-  const remaining=(state.players||[]).filter(p=>p.status!=="won");
-  if(counter) counter.textContent = `(${remaining.length})`;
-  root.innerHTML = remaining.length ? remaining.map(p=>{
-    const pi = computePerformanceIndex(p);
-    const priority = computeBidPriority(p);
-    const must = (p.must_bid_flag && /y|yes|true/i.test(String(p.must_bid_flag))) || (pi>=MUST_BID_THRESHOLD && availabilityIsBothDays(p.availability));
-    const lowAvail = !availabilityIsBothDays(p.availability);
-    const tags = [
-      must ? `<span style="background:#fde68a;color:#7c2d12;padding:2px 6px;border-radius:999px;font-size:11px;">Must Bid</span>` : "",
-      lowAvail ? `<span style="background:#fee2e2;color:#7f1d1d;padding:2px 6px;border-radius:999px;font-size:11px;">Low availability</span>` : "",
-      `<span style="background:#e5e7eb;color:#111827;padding:2px 6px;border-radius:999px;font-size:11px;">PI:${pi}</span>`
-    ].filter(Boolean).join(" ");
-    return `
-      <div class="item" style="padding:10px;border-bottom:1px solid #eee;${lowAvail?'opacity:.92;':''}">
-        <div class="row" style="display:flex;justify-content:space-between;gap:8px">
-          <div>
-            <div style="display:flex;gap:8px;align-items:center;"><b>${p.name}</b> ${tags}</div>
-            <div class="meta" style="color:#6b7280">
-              ${(p.alumni||"")}${(p.alumni&&p.phone)?" · ":""}${(p.phone||"")}
-              ${(p.skill?" · "+p.skill:"")}${(p.batting_type?" · "+p.batting_type:"")}${(p.bowling_type?" · "+p.bowling_type:"")}
-              ${(Number.isFinite(p.category)?" · Cat:"+p.category:"")}${(Number.isFinite(p.base_point)?" · Base:"+p.base_point:"")}
-            </div>
-          </div>
-          <button class="btn btn-ghost" data-id="${p.id}" data-action="pick">Pick</button>
-        </div>
-      </div>`; }).join("") : `<div class="hint">Import players using the master template.</div>`;
-  root.querySelectorAll("[data-action='pick']").forEach(btn=>{ btn.addEventListener("click", ()=> setActivePlayer(btn.getAttribute("data-id"))); });
-}
-
-function renderSelectedSquad(){
-  const root=$("selectedList"); if(!root) return; const c=myClub();
-  const mine=(state.players||[]).filter(p=>p.owner===state.myClubSlug&&p.status==="won");
-  const header=`<div class="row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div class="meta">Players: <b>${mine.length}</b> · Budget left: <b>${toNum(c?.budget_left,0)}</b></div></div>`;
-  root.innerHTML = mine.length ? header + mine.map(miniRow).join("") : header + `<div class="hint">No players won yet.</div>`;
-}
-
-function renderOtherClubsPanel(){
-  const root=$("otherClubsPanel"); if(!root) return;
-  const others=(state.clubs||[]).filter(c=>c.slug!==state.myClubSlug);
-  root.innerHTML = others.map(c=>{
-    const players=(state.players||[]).filter(p=>p.owner===c.slug&&p.status==="won");
-    const spend=players.reduce((s,p)=>s+toNum(p.finalBid,0),0);
-    const balance=Math.max(0, (c.starting_budget||DEFAULT_TOTAL_POINTS)-spend);
-    const list = players.length ? players.map(miniRow).join("") : `<div class="hint">No players yet.</div>`;
-    const slots=Math.max(0,(state.playersNeeded||DEFAULT_PLAYERS_CAP)-players.length);
-    return `
-  <div class="club-box" style="padding:10px;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:10px;background:#fff">
-    <div class="club-head" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-      <div style="font-size:14px;"><b>${c.name}</b></div>
-      <div style="margin-left:auto;font-size:12px;color:#374151;">Balance players: <b>${slots}</b></div>
-    </div>
-    <div style="font-size:12px;color:#374151;margin-bottom:6px;">Balance points: <b>${balance}</b></div>
-    <div class="club-list" style="max-height:220px;overflow:auto">${list}</div>
-  </div>`; }).join("");
-}
-
-function renderComplianceBar(){
-  const root=$("complianceBar"); if(!root) return;
-  const {wk,lhb,bowl}=complianceForMySquad(); const need={wk:2, lhb:2, bowl:8};
-  const badge=(cur,req,label)=>`<span>${label}: <b style="color:${cur>=req?"#16a34a":"#dc2626"}">${cur}/${req}</b></span>`;
-  root.innerHTML = `<div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:8px">
-  ${badge(wk,need.wk,"WK")} ${badge(lhb,need.lhb,"Left-hand")} ${badge(bowl,need.bowl,"Bowlers")}
-</div>`;
-}
-
-function renderLiveBid(){
-  const live=$("liveBid"); if(!live) return; const p=getActivePlayer();
-  if(!p){ live.innerHTML = `<div class="hint">No active player. Use the Name picker or click Pick on the list.</div>`; renderInsights(null); return; }
-  const pi = computePerformanceIndex(p); const priority=computeBidPriority(p); const cap=suggestedCap(p);
-  const must = (p.must_bid_flag && /y|yes|true/i.test(String(p.must_bid_flag))) || (pi>=MUST_BID_THRESHOLD && availabilityIsBothDays(p.availability));
-  const lowAvail=!availabilityIsBothDays(p.availability);
-  const flags=[ must?`<span style="background:#fde68a;color:#7c2d12;padding:2px 8px;border-radius:999px;font-size:12px;">Must Bid</span>`:"", lowAvail?`<span style="background:#fee2e2;color:#7f1d1d;padding:2px 8px;border-radius:999px;font-size:12px;">Low availability</span>`:"", `<span style="background:#e5e7eb;color:#111827;padding:2px 8px;border-radius:999px;font-size:12px;">PI:${pi} · Prio:${priority}</span>` ].filter(Boolean).join(" ");
-  live.innerHTML = `
-    <div class="card" style="padding:12px;${must?"box-shadow:0 0 0 3px #fef08a inset;":""}">
-      <div style="display:flex;gap:8px;align-items:center;">
-        <div style="font-size:18px;font-weight:700">${p.name}</div>
-        ${flags}
-      </div>
-      <div class="meta" style="color:#6b7280">
-        ${(p.alumni||"")}${(p.alumni&&p.phone)?" · ":""}${(p.phone||"")}
-        ${(p.skill?" · "+p.skill:"")}${(p.batting_type?" · "+p.batting_type:"")}${(p.bowling_type?" · "+p.bowling_type:"")}
-        ${(Number.isFinite(p.category)?" · Cat:"+p.category:"")}${(Number.isFinite(p.base_point)?" · Base:"+p.base_point:"")}
-      </div>
-      <div class="row" style="display:flex;gap:8px;margin-top:10px;align-items:flex-end;flex-wrap:wrap">
-        <label style="flex:0 1 180px">Bid Amount
-          <input id="bidInput" type="number" min="200" placeholder="e.g. ${cap}" />
-        </label>
-        <div class="hint">Suggested Max: <b>${cap}</b></div>
-        <button id="btn-mark-won" class="btn" disabled>HRB Won</button>
-        <button id="btn-pass" class="btn btn-ghost">Pass / Assign</button>
-      </div>
-      <div id="bidWarn" class="hint" style="margin-top:6px;color:#dc2626"></div>
-    </div>`;
-  const bidEl=$("bidInput"), wonBtn=$("btn-mark-won"), warnEl=$("bidWarn");
-  const validate=()=>{
-    const raw=bidEl.value; if(!raw||!String(raw).trim().length){ warnEl.textContent="Enter a bid (≥ "+minBase()+")."; wonBtn.disabled=true; return false; }
-    const price=Number(raw); if(!Number.isFinite(price)||price<minBase()){ warnEl.textContent="Enter a bid (≥ "+minBase()+")."; wonBtn.disabled=true; return false; }
-    const ok=guardrailOK(price); wonBtn.disabled=!ok; const floor=Math.max(0,(remainingSlots()-1)*minBase()); warnEl.textContent = ok?"":`Guardrail: keep ≥ ${floor} for remaining slots.`; return ok; };
-  bidEl.addEventListener("input", ()=>{ validate(); renderInsights(p, Number(bidEl.value)||null); });
-  validate();
-  wonBtn.addEventListener("click", ()=>{ if(!validate()) return; markWon(p.id, Number(bidEl.value)); });
-  $("btn-pass")?.addEventListener("click", ()=>{ const panel=$("passPanel"); if(!panel) return; panel.style.display="block"; panel.scrollIntoView({behavior:"smooth", block:"center"}); wirePassPanelForPlayer(p); });
-  renderInsights(p, Number(bidEl.value)||null);
-}
-
-function updateHeaderStats(){
-  const c=myClub(); const remainingPts=c? toNum(c.budget_left,c.starting_budget||0):0; const remSlots=remainingSlots(); const guardEl=$("guardrail");
-  if($("remainingPoints")) $("remainingPoints").textContent=remainingPts;
-  if($("remainingSlots")) $("remainingSlots").textContent=remSlots;
-  if(guardEl) guardEl.innerHTML = `Guardrail (min per slot): <b>${minBase()}</b>`;
-  // NEW: update round + timer display
-  if($("roundNo")) $("roundNo").textContent = state.roundNo || 1;
-  if($("timerDisplay")) $("timerDisplay").textContent = formatSeconds(state.timer?.remaining ?? 45);
-  if($("btn-undo")) $("btn-undo").disabled = !canUndo();
-}
-
-function render(){ renderPlayersList(); renderOtherClubsPanel(); renderLiveBid(); renderSelectedSquad(); renderComplianceBar(); updateHeaderStats(); }
-
-/* ============= Pass / Assign ============= */
-function wirePassPanelForPlayer(p){
-  const input=$("passClubInput"), list=$("clubNames"), amt=$("passBidAmount"), msg=$("passPanelMsg"), btn=$("btn-assign-to-club");
-  if(!list) return; const clubs=state.clubs||[];
-  list.innerHTML = clubs.map(c=>`<option value="${c.name}"></option>`).join("");
-  if(amt) amt.value = $("bidInput")?.value || "";
-  if(btn){
-    btn.onclick=null; btn.addEventListener("click", ()=>{
-      if(msg) msg.textContent="";
-      const clubText=(input?.value||"").trim();
-      const price=amt?.value||"";
-      assignToClubByNameOrSlug(p.id, clubText, price);
+  // budgetLeft needs to follow totalPoints if user changes settings
+  function resetClubBudgets(total) {
+    Clubs.forEach(c => {
+      state.clubs[c].budgetLeft = total;
+      state.clubs[c].won = [];
     });
   }
-}
 
-/* ============= Export / Template ============= */
-function exportWonCSV(){
-  const won=(state.players||[]).filter(p=>p.status==="won");
-  const rows=[["Club","Player Name","Alumni","Phone","Final Bid"]];
-  won.forEach(p=>{
-    const club=(state.clubs||[]).find(c=>c.slug===p.owner);
-    rows.push([club?club.name:(p.owner||""), p.name||"", p.alumni||"", p.phone||"", toNum(p.finalBid,0)]);
-  });
-  downloadCSV(rows, "auction-won-contacts.csv");
-}
-function exportAllStateCSV(){
-  const rows=[[
-    "Player ID","Player Name","Alumni","Phone","Role","Batting","Bowling","Category","Base",
-    "Availability","PI","Priority","Status","Owner","Final Bid"
-  ]];
-  (state.players||[]).forEach(p=>{
-    rows.push([
-      p.id, p.name||"", p.alumni||"", p.phone||"", p.skill||"", p.batting_type||"", p.bowling_type||"",
-      toNum(p.category,""), toNum(p.base_point,""), p.availability||"",
-      computePerformanceIndex(p), computeBidPriority(p), p.status||"", (p.owner||""), toNum(p.finalBid,"")
-    ]);
-  });
-  downloadCSV(rows, "auction-full-state.csv");
-}
-function downloadCSV(rows, filename){
-  const csv=rows.map(r=>r.map(v=>{
-    const s=String(v??""); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
-  }).join(",")).join("\n");
-  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"}), url=URL.createObjectURL(blob);
-  const a=document.createElement("a"); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
-}
-function downloadTemplateCSV(){
-  const headers = [
-    "player_id","name","alumni","phone","skill","batting_type","bowling_type","wk",
-    "availability","category","base_point","previous_team","matches_played","bat_avg",
-    "strike_rate","runs","50s","100s","not_outs","wickets","eco_rate","best_bowling",
-    "five_wkts","catches","runouts","performance_index","popularity_index",
-    "must_bid_flag","availability_flag","bid_priority_score"
-  ];
-  downloadCSV([headers], "HRB_Auction_Master_Template.csv");
-}
+  // --- UI references --------------------------------------------------------
+  const loginCard = $("#loginCard");
+  const settingsCard = $("#settingsCard");
+  const liveCard = $("#liveCard");
 
-/* ============= Timer + Round ============= */
-let _timerHandle = null;
-function formatSeconds(s){ s=Math.max(0,Math.floor(s||0)); const m=Math.floor(s/60); const r=s%60; return `${String(m).padStart(2,'0')}:${String(r).padStart(2,'0')}`; }
-function startTimer(){
-  if(state.timer.running) return;
-  state.timer.running = true;
-  persist();
-  if(_timerHandle) clearInterval(_timerHandle);
-  _timerHandle = setInterval(()=>{
-    state.timer.remaining = Math.max(0, (state.timer.remaining||0) - 1);
-    if($("timerDisplay")) $("timerDisplay").textContent = formatSeconds(state.timer.remaining);
-    if(state.timer.remaining<=0){ pauseTimer(); }
-  }, 1000);
-  updateHeaderStats();
-}
-function pauseTimer(){
-  state.timer.running = false;
-  if(_timerHandle) clearInterval(_timerHandle);
-  _timerHandle=null; persist(); updateHeaderStats();
-}
-function resetTimer(){
-  state.timer.remaining = state.timer.duration || 45;
-  persist(); updateHeaderStats();
-}
-function nextRound(){
-  state.roundNo = (state.roundNo||1) + 1;
-  resetTimer();
-  persist(); updateHeaderStats();
-}
-function wireTimerUI(){
-  $("btn-timer-start")?.addEventListener("click", startTimer);
-  $("btn-timer-pause")?.addEventListener("click", pauseTimer);
-  $("btn-timer-reset")?.addEventListener("click", resetTimer);
-  $("btn-next-round")?.addEventListener("click", nextRound);
-}
+  const loginPass = $("#loginPass");
+  const btnLogin = $("#btnLogin");
 
-/* ============= Settings & Startup ============= */
-function recomputeAvailableScorePreview(){
-  const total=toNum($("cfgTotalPoints")?.value, state.totalPoints||DEFAULT_TOTAL_POINTS);
-  const hrbMap={};
-  const preTxt=$("cfgPreName")?.value||"";
-  if(preTxt.includes("=")){
-    preTxt.split(";").forEach(s=>{ s=s.trim(); if(!s) return; const [n,v]=s.split("=").map(x=>x.trim()); if(n) hrbMap[n.toLowerCase()]=toNum(v,0); });
-  }
-  const preSum=Object.values(hrbMap).reduce((s,v)=>s+toNum(v,0),0);
-  const out=Math.max(0,total-preSum);
-  if($("cfgAvailableScore")) $("cfgAvailableScore").textContent=out;
-}
+  const csvUrl = $("#csvUrl");
+  const csvPaste = $("#csvPaste");
+  const inpSquad = $("#inpSquad");
+  const inpPoints = $("#inpPoints");
+  const btnLoadCsv = $("#btnLoadCsv");
+  const btnProceed = $("#btnProceed");
+  const loadStatus = $("#loadStatus");
+  const kSquad = $("#kSquad");
+  const kPoints = $("#kPoints");
 
-function renderClubPreselectedPanel(){
-  const root=$("clubPreselectedPanel"); if(!root) return; const clubs=state.clubs||[];
-  const lines=clubs.map(c=>{
-    const val=Object.entries(state.preselectedByClub?.[c.slug]||{}).map(([n,v])=>`${n}=${v}`).join("; ");
-    return `
-  <div class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:8px;">
-    <label style="flex:0 0 220px;"><b>${c.name}</b></label>
-    <label style="flex:1;">Preselected (Name=Price; Name2=Price)
-      <input id="pre_${c.slug}" value="${val}" placeholder="e.g. John WK=1200; Anil=900" />
-    </label>
-  </div>`;
-  }).join("");
-  root.innerHTML = lines || `<div class="hint">Clubs will appear here.</div>`;
-}
+  const playersList = $("#playersList");
+  const search = $("#search");
+  const btnClearSearch = $("#btnClearSearch");
 
-function collectClubPreselectedFromUI(){
-  const out={}; (state.clubs||[]).forEach(c=>{
-    const el=$("pre_"+c.slug); const txt=el?el.value:""; const map={};
-    if(String(txt||"").includes("=")){
-      txt.split(";").forEach(s=>{ s=s.trim(); if(!s) return; const [n,v]=s.split("=").map(x=>x.trim()); if(n) map[n.toLowerCase()]=toNum(v,0); });
+  const activeName = $("#activeName");
+  const activeCat = $("#activeCat");
+  const activeBase = $("#activeBase");
+  const inpBid = $("#inpBid");
+  const bidHint = $("#bidHint");
+  const btnHrbWon = $("#btnHrbWon");
+  const selOtherClub = $("#selOtherClub");
+  const btnAssignOther = $("#btnAssignOther");
+
+  const kHrbPlayers = $("#kHrbPlayers");
+  const kHrbLeft = $("#kHrbLeft");
+  const kGuard = $("#kGuard");
+  const hrbList = $("#hrbList");
+  const hrbSummary = $("#hrbSummary");
+
+  const c1Left = $("#c1Left"); const c2Left = $("#c2Left"); const c3Left = $("#c3Left");
+  const c1Cap = $("#c1Cap");   const c2Cap = $("#c2Cap");   const c3Cap = $("#c3Cap");
+  const mixNote = $("#mixNote");
+  const btnExportWon = $("#btnExportWon");
+  const btnLogout = $("#btnLogout");
+
+  // --- auth --------------------------------------------------------------
+  btnLogin.addEventListener("click", () => {
+    if (loginPass.value.trim() !== "sandeep") {
+      alert("Wrong password. (Hint: sandeep)");
+      return;
     }
-    out[c.slug]=map;
+    state.loggedIn = true;
+    loginCard.style.display = "none";
+    settingsCard.style.display = "block";
   });
-  return out;
-}
 
-function wireCsvImportUI(){
-  const urlEl=$("csvUrl"), pasteEl=$("csvPaste");
-  const btnFetch=$("btn-fetch"), btnImport=$("btn-import");
-  const btnClearUrl=$("btn-clear-url"), btnClearPaste=$("btn-clear-paste");
-  const btnTemplate=$("btn-download-template");
-  const setMsg=(t)=>{ const m=$("importMsg"); if(m) m.textContent=t; };
+  // --- CSV load -----------------------------------------------------------
+  btnLoadCsv.addEventListener("click", async () => {
+    loadStatus.textContent = "Loading…";
+    try {
+      let csvText = csvPaste.value.trim();
+      if (!csvText && csvUrl.value.trim()) {
+        const r = await fetch(csvUrl.value.trim());
+        if (!r.ok) throw new Error(`Fetch failed: ${r.status}`);
+        csvText = await r.text();
+      }
+      if (!csvText) {
+        loadStatus.textContent = "Paste CSV or provide a CSV URL.";
+        return;
+      }
+      const rows = csvToRows(csvText);
+      if (rows.length < 2) throw new Error("No data rows found.");
 
-  if(btnTemplate){ btnTemplate.onclick = downloadTemplateCSV; }
-
-  if(btnFetch&&urlEl){
-    btnFetch.onclick=null; btnFetch.addEventListener("click", async()=>{
-      try{
-        setMsg("");
-        const url=(urlEl.value||"").trim(); if(!url){ setMsg("Enter a Google Sheet CSV URL"); return; }
-        const resp=await fetch(url,{cache:"no-store"}); if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const text=await resp.text(); if(pasteEl) pasteEl.value=text;
-        setMsg("Fetched CSV — click Import to load players.");
-      }catch(e){ console.error(e); setMsg("Fetch failed. Ensure sheet is 'Published to the web' and URL ends with output=csv."); }
-    });
-  }
-  if(btnImport&&pasteEl){
-    btnImport.onclick=null; btnImport.addEventListener("click", ()=>{
-      try{
-        setMsg("");
-        const raw=pasteEl.value||""; if(!raw.trim()){ setMsg("Paste CSV first or use Fetch CSV."); return; }
-        let players=parseCSVPlayers(raw);
-        if(!players.length){ setMsg("Could not parse. Ensure headers match the master template."); return; }
-        state.players=players.map(p=>({ ...p, status: p.status==="won"?"won":"new" }));
-        ensureDefaultClubsSeeded(); recomputeBudgetsFromWins(); persist(); render();
-        setMsg(`Imported ${players.length} players.`);
-        $("playersList")?.scrollIntoView({behavior:"smooth", block:"start"});
-      }catch(e){ console.error(e); setMsg("Import failed: "+(e?.message||"Check console.")); }
-    });
-  }
-  if(btnClearUrl&&urlEl){
-    btnClearUrl.onclick=null; btnClearUrl.addEventListener("click", ()=>{ urlEl.value=""; const m=$("importMsg"); if(m) m.textContent=""; });
-  }
-  if(btnClearPaste&&pasteEl){
-    btnClearPaste.onclick=null; btnClearPaste.addEventListener("click", ()=>{ pasteEl.value=""; const m=$("importMsg"); if(m) m.textContent=""; });
-  }
-}
-
-function wireExportButton(){
-  const wonBtn=$("btn-export"); if(wonBtn){ wonBtn.onclick=null; wonBtn.addEventListener("click", exportWonCSV); }
-  const allBtn=$("btn-export-state"); if(allBtn){ allBtn.onclick=null; allBtn.addEventListener("click", exportAllStateCSV); }
-  const undoBtn=$("btn-undo"); if(undoBtn){ undoBtn.onclick=null; undoBtn.addEventListener("click", undo); }
-}
-
-function wireStartBidUI(){
-  const input=$("startName"), menu=$("startResults"), btn=$("btn-start-bid"), seed=$("seedBase");
-  const whatIf=$("whatIfBid"), applyBtn=$("btn-apply-whatif");
-  if(!input||!menu||!btn) return;
-  function candidates(q){ q=(q||"").trim().toLowerCase(); if(q.length<2) return []; return (state.players||[]).filter(p=>p.status!=="won").filter(p=> (p.name||"").toLowerCase().includes(q) || (p.alumni||"").toLowerCase().includes(q)).slice(0,10); }
-  input.addEventListener("input", ()=>{
-    const list=candidates(input.value);
-    if(!list.length){ menu.style.display="none"; menu.innerHTML=""; return; }
-    menu.style.display="block";
-    menu.innerHTML=list.map(p=>`<div class="ta-item" data-id="${p.id}">${p.name}${p.alumni?" · "+p.alumni:""}</div>`).join("");
-    $$(".ta-item",menu).forEach(el=>{
-      el.addEventListener("click", ()=>{
-        const id=el.getAttribute("data-id");
-        setActivePlayer(id); menu.style.display="none";
-        if(seed){ const player=state.players.find(x=>x.id===id); seed.value = Number.isFinite(player?.base_point)?player.base_point:(Number.isFinite(player?.base)?player.base:""); }
-      });
-    });
-  });
-  btn.addEventListener("click", ()=>{
-    const q=(input.value||"").trim().toLowerCase(); if(!q) return;
-    const rem=(state.players||[]).filter(p=>p.status!=="won");
-    const exact = rem.find(p=>(p.name||"").toLowerCase()===q || (((p.name||"")+" "+(p.alumni||"")).toLowerCase()===q)) || rem.find(p=>(p.name||"").toLowerCase().startsWith(q));
-    if(exact){
-      setActivePlayer(exact.id);
-      if(seed){ seed.value = Number.isFinite(exact.base_point)?exact.base_point:(Number.isFinite(exact.base)?exact.base:""); }
-    }
-  });
-  if(applyBtn && whatIf){
-    applyBtn.onclick=null; applyBtn.addEventListener("click", ()=>{
-      const p=getActivePlayer(); if(!p) return;
-      renderInsights(p, toNum(whatIf.value,null));
-    });
-  }
-}
-
-function wireLoginUI(){
-  const view=$("loginView"), btn=$("btn-login"), u=$("loginUser"), p=$("loginPass"), err=$("loginError");
-  if(!view||!btn) return;
-  show(view,!state.auth.loggedIn);
-  show($("settingsView"),false);
-  show($("appMain"),state.auth.loggedIn);
-  btn.onclick=null; btn.addEventListener("click", ()=>{
-    const user=(u?.value||"").trim(), pass=(p?.value||"").trim();
-    if(user!=="HRB"||pass!=="sandeep"){ if(err) err.textContent="Invalid credentials."; return; }
-    state.auth={loggedIn:true,user:"HRB"}; persist();
-    show(view,false); show($("settingsView"),true); show($("appMain"),false);
-  });
-}
-
-function wireSettingsUI(){
-  const btn=$("btn-save-settings"); if(!btn) return;
-  const playersCap=$("cfgPlayersCap"), totalPts=$("cfgTotalPoints"), guardMin=$("cfgGuardMin");
-  const preTxt=$("cfgPreName"), preSingle=$("cfgPreBid");
-  ["cfgTotalPoints","cfgPreName"].forEach(id=>{ $(id)?.addEventListener("input", recomputeAvailableScorePreview); });
-  renderClubPreselectedPanel();
-  recomputeAvailableScorePreview();
-
-  btn.onclick=null; btn.addEventListener("click", ()=>{
-    state.playersNeeded = toNum(playersCap?.value, DEFAULT_PLAYERS_CAP);
-    state.totalPoints = toNum(totalPts?.value, DEFAULT_TOTAL_POINTS);
-    state.minBasePerPlayer = toNum(guardMin?.value, DEFAULT_MIN_BASE);
-
-    const my = {};
-    const text=(preTxt?.value||"").trim();
-    if(text.includes("=")){
-      text.split(";").forEach(s=>{
-        s=s.trim(); if(!s) return;
-        const [n,v]=s.split("=").map(x=>x.trim());
-        if(n) my[n.toLowerCase()]=toNum(v,0);
-      });
-    } else if (text && preSingle?.value){
-      my[text.toLowerCase()] = toNum(preSingle.value,0);
-    }
-    state.preselectedByClub = collectClubPreselectedFromUI();
-
-    ensureDefaultClubsSeeded();
-    (state.clubs||[]).forEach(c=>{
-      const map = (c.slug===state.myClubSlug) ? my : (state.preselectedByClub?.[c.slug]||{});
-      const sum = Object.values(map).reduce((s,v)=>s+toNum(v,0),0);
-      c.starting_budget = state.totalPoints;
-      c.budget_left = Math.max(0, c.starting_budget - sum);
-      Object.keys(map).forEach(nameLC=>{
-        const player=(state.players||[]).find(pp=> (pp.name||"").toLowerCase()===nameLC);
-        if(player && player.status!=="won"){
-          player.status="won"; player.finalBid=toNum(map[nameLC],0); player.owner=c.slug;
+      const headers = rows[0].map(h => h.toLowerCase());
+      const idx = (key, ...alts) => {
+        const tries = [key.toLowerCase(), ...alts.map(a=>a.toLowerCase())];
+        for (const t of tries) {
+          const i = headers.indexOf(t);
+          if (i !== -1) return i;
         }
+        return -1;
+      };
+
+      const iName = idx("name","player","player_name");
+      const iAlum = idx("alumni","alum","alumni_name");
+      const iPhone= idx("phone","mobile","contact");
+      const iCat  = idx("category","cat");
+      const iBase = idx("base_point","base","basepoints");
+      const iPI   = idx("performance_index","pi","rank","rating");
+
+      if (iName === -1 || iCat === -1 || iBase === -1) throw new Error("CSV must include name, category, base_point.");
+
+      state.players = rows.slice(1).filter(r => r.length>=headers.length).map((r,idxr) => {
+        const rawCat = (r[iCat]||"").toString().trim().toLowerCase();
+        const baseFromCsv = toInt(r[iBase], 0);
+        const catBase = BaseByCategory[rawCat] ?? 0;
+        // If a row's base is missing, derive from category table; else keep the CSV value
+        const base_point = baseFromCsv>0 ? baseFromCsv : (catBase>0?catBase:TOURNAMENT_MIN_BASE);
+        return {
+          id: "p"+(idxr+1),
+          name: (r[iName]||"").trim(),
+          alumni: iAlum!==-1 ? (r[iAlum]||"").trim() : "",
+          phone: iPhone!==-1 ? (r[iPhone]||"").trim() : "",
+          category: rawCat || "cat 4",
+          base_point,
+          performance_index: iPI!==-1 ? toInt(r[iPI], 0) : 0,
+          owner: "", final_bid: 0
+        };
       });
+
+      // settings sync
+      state.squadSize = Math.max(1, toInt(inpSquad.value, 15));
+      state.totalPoints = Math.max(1, toInt(inpPoints.value, 15000));
+      kSquad.textContent = state.squadSize;
+      kPoints.textContent = state.totalPoints;
+      resetClubBudgets(state.totalPoints);
+
+      loadStatus.textContent = `Loaded ${state.players.length} players.`;
+      btnProceed.disabled = false;
+      renderPlayers();
+    } catch (e) {
+      console.error(e);
+      loadStatus.textContent = "Error: " + e.message;
+      btnProceed.disabled = true;
+    }
+  });
+
+  btnProceed.addEventListener("click", () => {
+    settingsCard.style.display = "none";
+    liveCard.style.display = "block";
+    updateTopBar();
+    updateCapacity();
+  });
+
+  // --- list + search ------------------------------------------------------
+  btnClearSearch.addEventListener("click", () => { search.value = ""; renderPlayers(); });
+  search.addEventListener("input", renderPlayers);
+
+  function renderPlayers() {
+    if (!playersList) return;
+    const q = search.value.trim().toLowerCase();
+    const remain = state.players.filter(p => !p.owner && (p.name.toLowerCase().includes(q) || p.alumni.toLowerCase().includes(q)));
+    playersList.innerHTML = "";
+    remain.forEach(p => {
+      const catLabel = (p.category||"").toUpperCase();
+      const row = el("div", {class:"li"}, [
+        el("div", {class:""}, [
+          el("div", {class:""}, [document.createTextNode(p.name || "(no name)")]),
+          el("div", {class:"tiny muted"}, [document.createTextNode((p.alumni||"").toString())]),
+        ]),
+        el("div", {class:"right"}, [
+          el("div", {class:"pill"}, [document.createTextNode(`${catLabel} • base ${p.base_point}`)]),
+          el("div", {class:"flex", style:"margin-top:6px;"}, [
+            el("button", {class:"btn", onclick:()=>setActive(p.id)}, [document.createTextNode("Pick")])
+          ])
+        ])
+      ]);
+      playersList.appendChild(row);
     });
+    if (!remain.length) {
+      playersList.appendChild(el("div", {class:"li"}, [document.createTextNode("No remaining players match your search.")]));
+    }
+  }
 
-    persist();
-    show($("settingsView"),false); show($("appMain"),true);
-    render();
+  function setActive(id) {
+    state.activeId = id;
+    const p = state.players.find(x => x.id === id);
+    if (!p) return;
+    activeName.textContent = p.name;
+    activeCat.textContent = (p.category||"").toUpperCase();
+    activeBase.textContent = p.base_point;
+    inpBid.value = p.base_point;
+    validateBid();
+  }
+
+  // --- bidding & guardrail -------------------------------------------------
+  function hrbWon(bid) {
+    const p = state.players.find(x => x.id === state.activeId);
+    if (!p) return;
+    p.owner = "HRB";
+    p.final_bid = bid;
+    state.clubs["HRB"].won.push(p.id);
+    state.clubs["HRB"].budgetLeft -= bid;
+    state.activeId = null;
+    activeName.textContent = "—";
+    activeCat.textContent = "—";
+    activeBase.textContent = "—";
+    inpBid.value = "";
+    bidHint.textContent = "Select a player to begin.";
+    renderPlayers();
+    renderHRB();
+    updateTopBar();
+    updateCapacity();
+  }
+
+  function assignOther(club, bid) {
+    const p = state.players.find(x => x.id === state.activeId);
+    if (!p) return;
+    p.owner = club;
+    p.final_bid = bid;
+    state.clubs[club].won.push(p.id);
+    state.clubs[club].budgetLeft -= bid;
+    state.activeId = null;
+    activeName.textContent = "—";
+    activeCat.textContent = "—";
+    activeBase.textContent = "—";
+    inpBid.value = "";
+    bidHint.textContent = "Select a player to begin.";
+    renderPlayers();
+    renderHRB();
+    updateTopBar();
+    updateCapacity();
+  }
+
+  function remainingSlotsHRB() {
+    return state.squadSize - state.clubs["HRB"].won.length;
+  }
+
+  function guardrailNow() {
+    // guardrail is 200 × remaining slots (current moment)
+    return TOURNAMENT_MIN_BASE * remainingSlotsHRB();
+  }
+
+  function validateBid() {
+    const p = state.players.find(x => x.id === state.activeId);
+    if (!p) {
+      btnHrbWon.disabled = true;
+      btnAssignOther.disabled = true;
+      return;
+    }
+    const bid = toInt(inpBid.value, 0);
+    const base = p.base_point;
+
+    // 1) start bid must be >= player's base_point
+    if (!Number.isFinite(bid) || bid < base) {
+      bidHint.innerHTML = `<span class="bad">Min starting bid for ${p.name} is ${base} (player base).</span>`;
+      btnHrbWon.disabled = true;
+      btnAssignOther.disabled = true;
+      return;
+    }
+
+    // 2) guardrail check after winning: ensure we keep 200 × slots_after_win
+    const slotsAfter = Math.max(0, remainingSlotsHRB() - 1);
+    const mustKeep = TOURNAMENT_MIN_BASE * slotsAfter;
+    const leftIfWin = state.clubs["HRB"].budgetLeft - bid;
+
+    if (leftIfWin < mustKeep) {
+      bidHint.innerHTML = `<span class="warn">Bid violates guardrail: after this win you'd keep ${leftIfWin}, but need ≥ ${mustKeep} (200 × remaining slots).</span>`;
+      btnHrbWon.disabled = true;
+    } else {
+      bidHint.innerHTML = `<span class="ok">Ok to bid.</span>`;
+      btnHrbWon.disabled = false;
+    }
+
+    // other club assignment requires a positive bid as well (we don't check their guardrail)
+    btnAssignOther.disabled = selOtherClub.value==="" || bid<=0;
+  }
+
+  inpBid.addEventListener("input", validateBid);
+  selOtherClub.addEventListener("change", validateBid);
+  btnHrbWon.addEventListener("click", () => {
+    const p = state.players.find(x => x.id === state.activeId);
+    if (!p) return;
+    const bid = toInt(inpBid.value, 0);
+    if (bid < p.base_point) {
+      alert(`Min starting bid for this player is ${p.base_point}.`);
+      return;
+    }
+    // final guardrail recheck
+    const slotsAfter = Math.max(0, remainingSlotsHRB() - 1);
+    const mustKeep = TOURNAMENT_MIN_BASE * slotsAfter;
+    const leftIfWin = state.clubs["HRB"].budgetLeft - bid;
+    if (leftIfWin < mustKeep) {
+      alert(`This would break the guardrail. Need to keep at least ${mustKeep} after this win.`);
+      return;
+    }
+    hrbWon(bid);
   });
-}
 
-function wireLogout(){
-  const btn=$("btn-logout"); if(!btn) return;
-  btn.onclick=null; btn.addEventListener("click", ()=>{
-    state = {
-      players: [],
-      auth: { loggedIn: false, user: null },
-      playersNeeded: DEFAULT_PLAYERS_CAP,
-      totalPoints: DEFAULT_TOTAL_POINTS,
-      minBasePerPlayer: DEFAULT_MIN_BASE,
-      categoryBase: { c1: null, c2: null, c3: null, c4: null, c5: null },
-      preselectedByClub: {},
-      myClubSlug: "high-range-blasters",
-      clubs: [],
-      activePlayerId: null,
-      roundNo: 1,
-      timer: { duration: 45, remaining: 45, running: false },
-      history: []
+  btnAssignOther.addEventListener("click", () => {
+    const p = state.players.find(x => x.id === state.activeId);
+    if (!p) return;
+    const bid = toInt(inpBid.value, 0);
+    if (bid <= 0) { alert("Enter a final price to assign."); return; }
+    const club = selOtherClub.value;
+    if (!club) { alert("Choose a club."); return; }
+    assignOther(club, bid);
+  });
+
+  // --- HRB panel + top bar -------------------------------------------------
+  function renderHRB() {
+    const hrb = state.clubs["HRB"];
+    hrbList.innerHTML = "";
+    hrb.won.slice().reverse().forEach(pid => {
+      const p = state.players.find(x=>x.id===pid);
+      if (!p) return;
+      const row = el("div", {class:"li"}, [
+        el("div", {}, [
+          el("div", {}, [document.createTextNode(p.name)]),
+          el("div", {class:"tiny muted"}, [document.createTextNode(`${p.alumni||''}  • ${p.phone||''}`)])
+        ]),
+        el("div", {class:"right"}, [
+          el("span", {class:"pill"}, [document.createTextNode(`${p.category.toUpperCase()}`)]),
+          el("div", {class:"tiny muted"}, [document.createTextNode(`Bid: ${p.final_bid}`)])
+        ])
+      ]);
+      hrbList.appendChild(row);
+    });
+    hrbSummary.textContent = `${hrb.won.length} players`;
+  }
+
+  function updateTopBar() {
+    const hrb = state.clubs["HRB"];
+    const have = hrb.won.length;
+    const leftSlots = state.squadSize - have;
+    kHrbPlayers.textContent = `${have}/${state.squadSize}`;
+    kHrbLeft.textContent = hrb.budgetLeft;
+    kGuard.textContent = TOURNAMENT_MIN_BASE * leftSlots;
+  }
+
+  // --- Top-category capacity calculation -----------------------------------
+  function updateCapacity() {
+    const hrb = state.clubs["HRB"];
+    const leftSlots = remainingSlotsHRB();
+
+    const remaining = state.players.filter(p => !p.owner);
+    const catCount = { c1:0, c2:0, c3:0 };
+    remaining.forEach(p => {
+      const c = (p.category||"").toLowerCase();
+      if (c.includes("1")) catCount.c1++;
+      else if (c.includes("2")) catCount.c2++;
+      else if (c.includes("3")) catCount.c3++;
+    });
+    c1Left.textContent = catCount.c1;
+    c2Left.textContent = catCount.c2;
+    c3Left.textContent = catCount.c3;
+
+    // Budget available for top-cats after reserving 200 × remaining slots
+    const mustKeep = TOURNAMENT_MIN_BASE * leftSlots;
+    const freeForAggressive = Math.max(0, hrb.budgetLeft - mustKeep);
+
+    const capC1 = Math.min(catCount.c1, Math.floor(freeForAggressive / 1500), leftSlots);
+    const capC2 = Math.min(catCount.c2, Math.floor(freeForAggressive / 1000), leftSlots);
+    const capC3 = Math.min(catCount.c3, Math.floor(freeForAggressive / 500) , leftSlots);
+
+    c1Cap.textContent = capC1;
+    c2Cap.textContent = capC2;
+    c3Cap.textContent = capC3;
+
+    // Recommended mix (greedy at base, highest category first)
+    let budget = freeForAggressive;
+    let slots  = leftSlots;
+    let r1=0,r2=0,r3=0;
+
+    const take = (cost, limit, refSetter) => {
+      if (slots<=0 || limit<=0 || budget<cost) return 0;
+      const maxByBudget = Math.floor(budget/cost);
+      const n = Math.max(0, Math.min(limit, maxByBudget, slots));
+      budget -= n*cost; slots -= n; refSetter(n);
+      return n;
     };
-    localStorage.removeItem("hrb-auction-state");
-    persist();
-    show($("appMain"),false); show($("settingsView"),false); show($("loginView"),true);
+
+    // How many actually available in each cat (not just affordable)
+    const a1 = Math.min(catCount.c1, leftSlots);
+    const a2 = Math.min(catCount.c2, leftSlots);
+    const a3 = Math.min(catCount.c3, leftSlots);
+
+    take(1500, a1, n=>r1=n);
+    take(1000, a2, n=>r2=n);
+    take(500 , a3, n=>r3=n);
+
+    mixNote.innerHTML =
+      `You can still target about <b>${r1}</b> × Cat-1, <b>${r2}</b> × Cat-2, <b>${r3}</b> × Cat-3 at base with your current budget, while preserving the 200×guardrail.`;
+  }
+
+  // --- export ---------------------------------------------------------------
+  btnExportWon.addEventListener("click", () => {
+    const header = ["Club","Player","Alumni","Phone","Category","FinalBid"];
+    const lines = [header.join(",")];
+    state.players.filter(p => p.owner).forEach(p => {
+      lines.push([p.owner, p.name, p.alumni||"", p.phone||"", (p.category||"").toUpperCase(), p.final_bid].join(","));
+    });
+    const blob = new Blob([lines.join("\n")], {type:"text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = el("a", {href:url, download:"auction_wins.csv"});
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(url), 2000);
+    a.remove();
   });
-}
 
-/* ============= Boot ============= */
-function boot(){
-  load();
-  ensureDefaultClubsSeeded();
+  // --- logout ---------------------------------------------------------------
+  btnLogout.addEventListener("click", () => {
+    location.reload();
+  });
 
-  show($("loginView"), !state.auth.loggedIn);
-  show($("settingsView"), state.auth.loggedIn && (state.players||[]).length===0);
-  show($("appMain"), state.auth.loggedIn && (state.players||[]).length>0);
-
-  wireLoginUI();
-  wireSettingsUI();
-  wireCsvImportUI();
-  wireExportButton();
-  wireStartBidUI();
-  wireLogout();
-  wireTimerUI();
-
-  // Keep timer UI in sync if already running
-  if(state.timer?.running){ startTimer(); }
-
-  if (state.auth.loggedIn && (state.players||[]).length>0) render();
-  console.log("boot()");
-}
-document.addEventListener("DOMContentLoaded", boot);
+  // initial
+  renderPlayers();
+  renderHRB();
+})();
