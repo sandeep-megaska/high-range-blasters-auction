@@ -180,3 +180,84 @@
     attachButton();
   }
 })();
+// --- Glue to keep UI and guards in sync ---
+// Enable HRB Won only when a player is active and input is valid.
+(function(){
+  const $ = (id)=>document.getElementById(id);
+  const getState = ()=> window.state || {};
+  const toNum = (v,d=0)=>{ const n=Number(v); return Number.isFinite(n)?n:d; };
+  const minBase = ()=>200;
+
+  function getActivePlayer(){
+    const s=getState();
+    const id=s.activePlayerId;
+    if (id==null) return null;
+    return (s.players||[]).find(p=>String(p.id)===String(id))||null;
+  }
+  function minBidFor(p){ return Math.max(minBase(), toNum(p && p.base_point, minBase())); }
+
+  const bidInput = $("bidInput");
+  const btnWon   = $("btn-mark-won");
+  const warnEl   = $("bidWarn");
+
+  if (!bidInput || !btnWon) return;
+
+  function refreshForActive(){
+    const p = getActivePlayer();
+    if (!p){
+      btnWon.disabled = true;
+      if (warnEl) warnEl.textContent = "Select a player to bid.";
+      return;
+    }
+    // keep UI min aligned to player's base
+    bidInput.min = String(minBidFor(p));
+    // auto-fill to base if empty or below base
+    const v = Number(bidInput.value || 0);
+    if (!Number.isFinite(v) || v < minBidFor(p)) {
+      bidInput.value = String(minBidFor(p));
+    }
+    // evaluate once
+    runValidation();
+  }
+
+  function runValidation(){
+    const p = getActivePlayer();
+    if (!p){ btnWon.disabled = true; return; }
+    const val = Number(bidInput.value||0);
+    let ok = true;
+    if (val < minBidFor(p)) ok = false;
+    // use patched guardrailOK if present
+    if (ok && typeof window.guardrailOK === "function") {
+      ok = !!window.guardrailOK(val);
+    }
+    btnWon.disabled = !ok;
+    if (warnEl){
+      if (val < minBidFor(p)){
+        warnEl.textContent = "Enter a bid ≥ base point: " + minBidFor(p);
+      } else if (!ok){
+        const maxNow = (typeof window.maxYouCanSpendNow==="function") ? window.maxYouCanSpendNow(p) : val;
+        warnEl.textContent = "Guardrail: reduce bid. You can safely spend up to " + maxNow + " now.";
+      } else {
+        warnEl.textContent = "";
+      }
+    }
+  }
+
+  // React to typing and to any app-driven re-render
+  bidInput.addEventListener("input", runValidation);
+
+  // Observe DOM & state changes: when lists re-render or selection changes
+  const obs = new MutationObserver(()=>{ refreshForActive(); });
+  obs.observe(document.body, { childList:true, subtree:true });
+
+  // If your app emits events on selection, hook them too
+  window.addEventListener("hrb:active-player-changed", refreshForActive);
+  window.addEventListener("hrb:render", refreshForActive);
+
+  // Initial pass
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", refreshForActive);
+  } else {
+    refreshForActive();
+  }
+})();
