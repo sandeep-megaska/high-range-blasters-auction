@@ -1,307 +1,374 @@
-/* HRB Auction Assistant — Consolidated App
- * Build: hrb-2025-11-03-TIMER-ROUND-UNDO
- * Features: timer+round strip, undo, strict base_point enforcement,
- *           guardrails using base_point floor, UI glue & insights.
- */
+/* HRB Auction Assist — Assistant Mode (warn & advise; do not hard-block) */
+const BUILD = "assistant-2025-11-03";
+console.log("[HRB] build:", BUILD);
 
-(function(){
-  console.log("[HRB] build: hrb-2025-11-03-TIMER-ROUND-UNDO");
-  // ---------- Core State ----------
-  window.state = {
-    playersNeeded: 15,
-    myClubSlug: "hrb",
-    round: 1,
-    timerSec: 0,
-    activePlayerId: null,
-    history: [],       // undo stack
-    players: [],
-    clubs: [
-      { slug:"hrb", name:"High Range Blasters", starting_budget: 15000, budget_left: 15000 },
-      { slug:"kea", name:"KEA", starting_budget: 15000, budget_left: 15000 },
-      { slug:"ace", name:"ACE", starting_budget: 15000, budget_left: 15000 },
-      { slug:"tcc", name:"TCC", starting_budget: 15000, budget_left: 15000 },
-    ]
-  };
+const DEFAULT = { slots: 15, total: 15000, minBase: 200 };
+const NEED = { wk: 2, lhb: 2, bowl: 8 };
 
-  // ---------- Utilities ----------
-  const $ = id => document.getElementById(id);
-  const toNum = (v,d=0)=>{ const n=Number(v); return Number.isFinite(n)?n:d; };
-  const minBase = ()=> 200;
+let state = {
+  players: [],
+  clubs: [
+    { slug:"hrb", name:"High Range Blasters", starting: DEFAULT.total, left: DEFAULT.total },
+    { slug:"kea", name:"KEA", starting: DEFAULT.total, left: DEFAULT.total },
+    { slug:"ace", name:"ACE", starting: DEFAULT.total, left: DEFAULT.total },
+    { slug:"tcc", name:"TCC", starting: DEFAULT.total, left: DEFAULT.total },
+  ],
+  my:"hrb",
+  slots: DEFAULT.slots,
+  minBase: DEFAULT.minBase,
+  activeId: null,
+  round: 1,
+  timer: { sec:45, run:false },
+  history: []
+};
 
-  function slugify(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"-"); }
+const $=id=>document.getElementById(id);
+const toNum=(v,d=0)=>{const n=Number(v);return Number.isFinite(n)?n:d;};
 
-  function getActivePlayer(){
-    const id = state.activePlayerId;
-    return id==null ? null : (state.players||[]).find(p=>String(p.id)===String(id))||null;
-  }
+function playerBase(p){ return Math.max(state.minBase, toNum(p.base_point, state.minBase)); }
+function remainingBudget(slug){ const c=state.clubs.find(c=>c.slug===slug); return c?toNum(c.left,c.starting):0; }
+function myRemainingBudget(){ return remainingBudget(state.my); }
+function myWon(){ return state.players.filter(p=>p.owner===state.my && p.status==="won"); }
+function remainingSlots(){ return Math.max(0, state.slots - myWon().length); }
 
-  function remainingSlots(){
-    const mine=(state.players||[]).filter(p=>p.owner===state.myClubSlug && p.status==="won").length;
-    return Math.max(0, toNum(state.playersNeeded,15) - mine);
-  }
+function computePI(p){
+  if (p.performance_index!=null && p.performance_index!=="") return Math.max(0, Math.min(100, Number(p.performance_index)||0));
+  // fallback: small heuristics
+  let base = 50;
+  if (/all/i.test(p.skill||"")) base+=8;
+  if (/bowl/i.test(p.skill||"")) base+=6;
+  if (/wk|wicket/i.test(p.skill||"")) base+=4;
+  if (/left/i.test(p.batting_type||p.batting||"")) base+=3;
+  base += (toNum(p.category,4)<=2)?8:(toNum(p.category,4)===3?3:0);
+  return Math.max(0, Math.min(100, base));
+}
+function isWK(p){ const f=String(p.wk||"").toLowerCase(); return f==="y"||f==="yes"||f==="true"||/wk|wicket/i.test(p.skill||""); }
+function isLeft(p){ return /left/i.test(String(p.batting_type||p.batting||"")); }
+function isBowler(p){ return /bowl/i.test(String(p.skill||"")) || /all/i.test(String(p.skill||"")); }
+function bidPriority(p){ const pi=computePI(p); const cat=toNum(p.category,4); const catBoost = (cat===1?12:(cat===2?8:(cat===3?4:0))); return Math.round(Math.min(120, pi+catBoost)); }
 
-  function remainingBudget(slug){
-    const c=(state.clubs||[]).find(c=>c.slug===slug);
-    return c ? toNum(c.budget_left, c.starting_budget||0) : 0;
-  }
+function recomputeClubBudgets(){
+  state.clubs.forEach(c=>{
+    const spend = state.players.filter(p=>p.owner===c.slug && p.status==="won").reduce((s,p)=>s+toNum(p.finalBid,0),0);
+    c.left = Math.max(0, c.starting - spend);
+  });
+}
 
-  function playerBase(p){
-    return Math.max(minBase(), toNum(p && p.base_point, minBase()));
-  }
+function guardrailOK(bid){
+  const remAfter = Math.max(0, remainingSlots()-1);
+  const floor = remAfter * state.minBase;
+  const bud = myRemainingBudget();
+  return (bid <= bud) && ((bud - bid) >= floor);
+}
+function maxSafeNow(p){
+  const remAfter = Math.max(0, remainingSlots()-1);
+  const floor = remAfter * state.minBase;
+  const bud = myRemainingBudget();
+  return Math.max(playerBase(p||{}), bud - floor);
+}
+function winProb(p, bid){
+  // rough: compare vs average per-slot budgets of other clubs
+  const others = state.clubs.filter(c=>c.slug!==state.my).map(c=>{
+    const players = state.players.filter(x=>x.owner===c.slug && x.status==="won").length;
+    const slots = Math.max(1, state.slots - players);
+    return (toNum(c.left,0)/slots);
+  });
+  const bench = others.length ? others.reduce((a,b)=>a+b,0)/others.length : state.minBase;
+  const ratio = bid / Math.max(1, bench);
+  const prio = bidPriority(p)/120;
+  const score = 0.4*ratio + 0.6*prio;
+  if (score >= 1.0) return {label:"High", cls:"ok"};
+  if (score >= 0.7) return {label:"Medium", cls:"warn"};
+  return {label:"Low", cls:"err"};
+}
+function suggestedCap(p){
+  const avgPerSlot = myRemainingBudget() / Math.max(1, remainingSlots());
+  const prio = bidPriority(p); // 0..120
+  const prioFactor = 0.6 + (prio/120)*0.9; // 0.6..1.5
+  const capByPriority = avgPerSlot * prioFactor;
+  const capByBase = playerBase(p) * (1 + computePI(p)/200); // 1..1.5 range
+  return Math.round(Math.max(state.minBase, Math.min(capByPriority, capByBase)));
+}
 
-  function remainingFloor(excludeId=null, slotsOverride=null){
-    const pool=(state.players||[]).filter(p=>p.status!=="won" && (excludeId? String(p.id)!==String(excludeId):true));
-    const k=Math.max(0, (slotsOverride==null? remainingSlots(): slotsOverride));
-    if (k<=0) return 0;
-    const bases=pool.map(p=>playerBase(p)).sort((a,b)=>a-b);
-    let sum=0;
-    for (let i=0;i<Math.min(k,bases.length);i++) sum+=bases[i];
-    if (bases.length<k) sum+=(k-bases.length)*minBase();
-    return sum;
-  }
-
-  // ---------- Persistence (no-op stubs for now) ----------
-  window.persist = function(){ /* could save to localStorage */ };
-  function pushHistory(action){
-    state.history.push(JSON.stringify({ action, snapshot: {
-      players: state.players, clubs: state.clubs, activePlayerId: state.activePlayerId,
-      round: state.round, timerSec: state.timerSec
-    }}));
+function pushHistory(tag){
+  try{
+    state.history.push(JSON.stringify({tag, players:state.players, clubs:state.clubs}));
     if (state.history.length>50) state.history.shift();
-  }
-  function restore(snapshot){
-    state.players = snapshot.players.map(p=>({...p}));
-    state.clubs   = snapshot.clubs.map(c=>({...c}));
-    state.activePlayerId = snapshot.activePlayerId;
-    state.round = snapshot.round;
-    state.timerSec = snapshot.timerSec;
-  }
+  }catch{}
+}
+function undo(){
+  const raw = state.history.pop(); if(!raw) return;
+  try{
+    const snap=JSON.parse(raw);
+    state.players = JSON.parse(JSON.stringify(snap.players||[]));
+    state.clubs = JSON.parse(JSON.stringify(snap.clubs||[]));
+    recomputeClubBudgets(); render();
+  }catch(e){ console.warn("undo failed", e); }
+}
 
-  // ---------- Guardrails ----------
-  function validateBidAgainstBase(p, bid){ return Number(bid)>=playerBase(p); }
+function setActive(id){ state.activeId = id; renderLive(); }
+function active(){ return state.players.find(p=>String(p.id)===String(state.activeId)); }
 
-  window.guardrailOK = function(bid){
-    const p=getActivePlayer();
-    const price = Number(bid||0);
-    if (!p || !Number.isFinite(price)) return false;
-    if (price < playerBase(p)) return false;
-    const bud = remainingBudget(state.myClubSlug);
-    const remSlotsAfter = Math.max(0, remainingSlots()-1);
-    const floorAfter = remainingFloor(p.id, remSlotsAfter);
-    return (price <= bud) && ((bud - price) >= floorAfter);
+// Assistant mode: warn + confirm
+function markHRBWon(playerId, price){
+  const p = state.players.find(x=>String(x.id)===String(playerId)); if(!p) return;
+  const bid = Number(price||0);
+  if (!Number.isFinite(bid) || bid < state.minBase){ alert(`Enter a valid bid ≥ ${state.minBase}.`); return; }
+  const msgs=[];
+  if (bid < playerBase(p)) msgs.push(`Below base point (${playerBase(p)}).`);
+  if (!guardrailOK(bid)) msgs.push(`Guardrail risk — save at least ${state.minBase} × remaining slots.`);
+  if (msgs.length){
+    if (!confirm("⚠️ "+msgs.join(" ")+" Proceed anyway?")) return;
+  }
+  pushHistory("HRB Won");
+  p.status="won"; p.owner=state.my; p.finalBid=bid;
+  recomputeClubBudgets(); render();
+}
+function assignToOther(playerId, clubSlug, price){
+  const p = state.players.find(x=>String(x.id)===String(playerId)); if(!p) return;
+  const c = state.clubs.find(c=>c.slug===clubSlug); if(!c){ alert("Pick a valid club."); return; }
+  const bid = Number(price||0);
+  if (!Number.isFinite(bid) || bid < state.minBase){ alert(`Enter a valid final bid ≥ ${state.minBase}.`); return; }
+  pushHistory("Assign other");
+  p.status="won"; p.owner=c.slug; p.finalBid=bid;
+  recomputeClubBudgets(); render();
+}
+
+function renderPlayers(){
+  const box=$("playersList"); const remaining=state.players.filter(p=>p.status!=="won");
+  if ($("playersCount")) $("playersCount").textContent = `(${remaining.length})`;
+  box.innerHTML = remaining.map(p=>{
+    const pi=computePI(p), pr=bidPriority(p);
+    return `<div class="rowp" data-id="${p.id}">
+      <div><b>${p.name||"-"}</b></div>
+      <div class="hint">${p.alumni||""}${(p.alumni&&p.phone)?" · ":""}${p.phone||""}</div>
+      <div class="hint">PI:${pi} · Prio:${pr} · Cat:${toNum(p.category,"-")} · Base:${playerBase(p)}</div>
+    </div>`;
+  }).join("") || `<div class="hint">Import CSV to get started.</div>`;
+  box.querySelectorAll(".rowp").forEach(el=> el.addEventListener("click", ()=> setActive(el.getAttribute("data-id")) ));
+}
+function renderLive(){
+  const target=$("liveCard"); const p=active(); if(!target) return;
+  if(!p){ target.innerHTML="Pick a player from the list."; $("insights").innerHTML=""; return; }
+  const cap=suggestedCap(p); const pi=computePI(p); const pr=bidPriority(p);
+  target.innerHTML = `<div>
+    <div class="flex" style="justify-content:space-between;gap:8px;">
+      <div><b>${p.name}</b></div>
+      <div class="hint">${p.alumni||""}${(p.alumni&&p.phone)?" · ":""}${p.phone||""}</div>
+    </div>
+    <div class="hint">${p.skill||""}${p.batting_type?" · "+p.batting_type:""}${p.bowling_type?" · "+p.bowling_type:""} · Cat:${toNum(p.category,"-")} · Base:${playerBase(p)}</div>
+    <div class="flex" style="gap:8px; margin-top:8px; align-items:flex-end;">
+      <label style="flex:0 0 180px">Bid <input id="bidInput" type="number" min="${state.minBase}" placeholder="${cap}"></label>
+      <button id="btn-win" class="btn">HRB Won</button>
+      <select id="clubSel" style="max-width:180px;">
+        ${state.clubs.filter(c=>c.slug!==state.my).map(c=>`<option value="${c.slug}">${c.name}</option>`).join("")}
+      </select>
+      <label style="flex:0 0 160px">Final Bid<input id="otherBid" type="number" min="${state.minBase}" placeholder="e.g. ${playerBase(p)}"></label>
+      <button id="btn-assign" class="btn btn-ghost">Assign</button>
+    </div>
+    <div id="bidWarn" class="hint" style="margin-top:6px;"></div>
+  </div>`;
+  const bidEl=$("bidInput"), warn=$("bidWarn");
+  function refreshWarn(){
+    const v=Number(bidEl.value||0); const notes=[];
+    if (v && v<playerBase(p)) notes.push(`Below base (${playerBase(p)}).`);
+    if (v && !guardrailOK(v)) notes.push(`Guardrail: keep points for remaining slots.`);
+    warn.innerHTML = notes.join(" ");
+    renderInsights(p, v||null);
+  }
+  bidEl.addEventListener("input", refreshWarn);
+  $("btn-win").addEventListener("click", ()=> markHRBWon(p.id, Number(bidEl.value||0)||playerBase(p)) );
+  $("btn-assign").addEventListener("click", ()=> assignToOther(p.id, $("clubSel").value, Number($("otherBid").value||0)||playerBase(p)) );
+  refreshWarn();
+}
+function renderSquad(){
+  const box=$("squad"); const mine=myWon();
+  const list = mine.map(p=>`<div class="flex" style="justify-content:space-between;border-bottom:1px solid #1f2937;padding:6px 0;">
+    <div>${p.name}</div><div class="hint">${p.alumni||""}</div><div class="ok">${toNum(p.finalBid,0)} pts</div></div>`).join("");
+  const left=myRemainingBudget();
+  box.innerHTML = `<div class="hint">Players: <b>${mine.length}</b> · Budget left: <b>${left}</b></div>` + (list || `<div class="hint" style="margin-top:6px;">No players yet.</div>`);
+}
+function renderClubs(){
+  const root=$("clubs");
+  root.innerHTML = state.clubs.filter(c=>c.slug!==state.my).map(c=>{
+    const won = state.players.filter(p=>p.owner===c.slug && p.status==="won");
+    const list = won.map(p=>`<div class="flex" style="justify-content:space-between;border-bottom:1px solid #1f2937;padding:4px 0;"><div>${p.name}</div><div class="hint">${toNum(p.finalBid,0)} pts</div></div>`).join("");
+    const slots=Math.max(0, state.slots - won.length);
+    return `<div class="card" style="padding:8px;margin-bottom:8px;">
+      <div class="flex" style="justify-content:space-between;"><div><b>${c.name}</b></div><div class="hint">Slots left: ${slots}</div></div>
+      <div class="hint">Points left: <b>${toNum(c.left,0)}</b></div>
+      <div style="max-height:160px;overflow:auto;margin-top:6px;">${list || "<div class='hint'>—</div>"}</div>
+    </div>`;
+  }).join("");
+}
+function renderCompliance(){
+  const mine=myWon();
+  const wk = mine.filter(isWK).length;
+  const lhb = mine.filter(isLeft).length;
+  const bowl = mine.filter(isBowler).length;
+  const badge=(cur,req,label)=>`<span>${label}: <b class="${cur>=req?'ok':'err'}">${cur}/${req}</b></span>`;
+  $("compliance").innerHTML = `${badge(wk,NEED.wk,"WK")} · ${badge(lhb,NEED.lhb,"LHB")} · ${badge(bowl,NEED.bowl,"Bowlers")}`;
+}
+function renderHealth(){
+  const left = myRemainingBudget();
+  const slots = remainingSlots();
+  const avg = Math.round(left / Math.max(1, slots));
+  const pool = state.players.filter(p=>p.status!=="won");
+  const bases = pool.map(playerBase).sort((a,b)=>a-b);
+  const med = bases.length? bases[Math.floor(bases.length/2)] : state.minBase;
+  let label="Healthy", cls="ok";
+  if (avg<med) { label="Tight"; cls="warn"; }
+  if (avg<0.6*med) { label="Risk"; cls="err"; }
+  $("health").innerHTML = `Remaining: <b>${left}</b> · Avg/slot: <b>${avg}</b> · Median base: <b>${med}</b> · <span class="${cls}">${label}</span>`;
+}
+function renderInsights(p, whatIf){
+  const div=$("insights"); if(!div){return;}
+  if(!p){ div.innerHTML=""; return; }
+  const cap=suggestedCap(p);
+  const safe=Math.max(playerBase(p), Math.round(cap*0.85));
+  const stretch=Math.round(cap*1.15);
+  const hard = maxSafeNow(p);
+  const prob = winProb(p, Number(whatIf||cap));
+  const scarcity = (()=>{
+    const rem = state.players.filter(x=>x.status!=="won");
+    const w = rem.filter(isWK).length;
+    const l = rem.filter(isLeft).length;
+    const b = rem.filter(isBowler).length;
+    const notes=[];
+    if (w<=2) notes.push("WK scarce");
+    if (l<=6) notes.push("LHB scarce");
+    if (b<=10) notes.push("Bowlers thinning");
+    return notes.join(" · ") || "No strong scarcity signals.";
+  })();
+  div.innerHTML = `<div class="grid2">
+    <div class="card">
+      <div><b>Price band</b> <span class="hint">(safe–stretch)</span></div>
+      <div style="margin-top:6px;">${safe} – ${stretch} (hard cap: <b>${hard}</b>)</div>
+    </div>
+    <div class="card">
+      <div><b>Win probability</b></div>
+      <div class="${prob.cls}" style="margin-top:6px;"><b>${prob.label}</b></div>
+    </div>
+  </div>
+  <div class="space"></div>
+  <div class="card">
+    <div><b>Strategy</b></div>
+    <div class="hint" style="margin-top:6px;">
+      Target Cat 1–3; stay compliant (2 WK, 8 Bowlers, 2 LHB). Keep avg/slot ≥ median base to avoid late squeeze. Scarcity: ${scarcity}
+    </div>
+  </div>`;
+}
+
+function renderAll(){ renderPlayers(); renderLive(); renderSquad(); renderClubs(); renderCompliance(); renderHealth(); }
+
+// Timer & round
+let tHandle=null;
+function paintTimer(){ const s=state.timer.sec; const m=String(Math.floor(s/60)).padStart(2,"0"); const ss=String(s%60).padStart(2,"0"); $("timer").textContent=`${m}:${ss}`; }
+function startTimer(){ if(tHandle) return; tHandle=setInterval(()=>{ state.timer.sec=Math.max(0,state.timer.sec-1); paintTimer(); if(state.timer.sec<=0){ stopTimer(); }},1000); }
+function stopTimer(){ if(tHandle){ clearInterval(tHandle); tHandle=null; } }
+function resetTimer(){ state.timer.sec=45; paintTimer(); }
+function nextRound(){ state.round+=1; $("roundNo").textContent=String(state.round); resetTimer(); }
+
+// CSV
+function splitCsv(text){ const rows=[],row=[],push=()=>rows.push(row.splice(0,row.length)); let cell="",inQ=false; for(let i=0;i<text.length;i++){ const ch=text[i],nx=text[i+1]; if(inQ){ if(ch==='"'&&nx=='"'){cell+='"';i++;continue;} if(ch=='"'){inQ=false;continue;} cell+=ch; continue;} if(ch=='"'){inQ=true;continue;} if(ch===','){row.push(cell);cell="";continue;} if(ch=='\n'){row.push(cell);cell="";push();continue;} cell+=ch;} row.push(cell); push(); return rows; }
+function normHead(s){ return String(s||"").trim().toLowerCase(); }
+function parsePlayersCSV(raw){
+  const rows=splitCsv(raw).filter(r=>r.some(c=>String(c).trim()!=="")); if(!rows.length) return [];
+  const header = rows[0].map(normHead);
+  const idx = ( *aliases ) => { for(const a of aliases){ const i=header.indexOf(a); if(i>=0) return i; } return -1; };
+  const i = {
+    name: idx("name","player","player name"),
+    alumni: idx("alumni","alumni name","member name"),
+    phone: idx("phone","mobile","whatsapp","contact"),
+    skill: idx("skill","role","playing role"),
+    batting: idx("batting","batting_type","batting hand"),
+    bowling: idx("bowling","bowling_type"),
+    wk: idx("wk","wicket-keeper","wicket keeper","keeper"),
+    cat: idx("category","cat"),
+    base: idx("base_point","base","base point"),
+    availability: idx("availability"),
+    pi: idx("performance_index","pi")
   };
-
-  window.maxYouCanSpendNow = function(playerOpt){
-    const p=playerOpt||getActivePlayer();
-    const bud = remainingBudget(state.myClubSlug);
-    const remSlotsAfter = Math.max(0, remainingSlots()-1);
-    const floorAfter = remainingFloor(p && p.id, remSlotsAfter);
-    return Math.max(playerBase(p||{}), bud - floorAfter);
-  };
-
-  // ---------- Budget recompute ----------
-  window.recomputeBudgetsFromWins = function(){
-    // reset to starting_budget then subtract won bids
-    state.clubs.forEach(c=> c.budget_left = toNum(c.starting_budget,0));
-    (state.players||[]).forEach(p=>{
-      if (p.status==="won" && Number(p.finalBid)>0){
-        const club = state.clubs.find(c=>c.slug===p.owner);
-        if (club) club.budget_left = Math.max(0, club.budget_left - Number(p.finalBid));
-      }
-    });
-  };
-
-  // ---------- Actions (with strict enforcement) ----------
-  function markWon(playerId, price){
-    const p = (state.players||[]).find(x=>x.id===playerId);
-    const bid=Number(price||0);
-    if (!p) return;
-    if (bid<playerBase(p)){ alert(`⚠️ Bid cannot be less than base point (${playerBase(p)}).`); return; }
-    if (!window.guardrailOK(bid)){ alert("⚠️ Guardrail: this bid would leave insufficient points for remaining slots."); return; }
-    pushHistory("markWon");
-    p.status="won"; p.finalBid=bid; p.owner=state.myClubSlug;
-    window.recomputeBudgetsFromWins(); window.persist(); render();
-  }
-  function assignToClubByNameOrSlug(playerId, clubText, price){
-    const p=(state.players||[]).find(x=>x.id===playerId);
-    const club=(state.clubs||[]).find(c=> c.slug===slugify(clubText) || c.name===clubText );
-    const bid=Number(price||0);
-    if (!p || !club) return;
-    if (bid<playerBase(p)){ alert(`⚠️ Bid cannot be less than base point (${playerBase(p)}).`); return; }
-    pushHistory("assignToClub");
-    p.status="won"; p.finalBid=bid; p.owner=club.slug;
-    window.recomputeBudgetsFromWins(); window.persist(); render();
-  }
-  window.markWon = markWon;
-  window.assignToClubByNameOrSlug = assignToClubByNameOrSlug;
-
-  // ---------- Safety Net (never persist below base) ----------
-  function enforceRosterIntegrity(opts={silent:false}){
-    const fixes = [];
-    (state.players||[]).forEach(p=>{
-      if (p.status==="won"){
-        const base = playerBase(p);
-        const bid  = toNum(p.finalBid,0);
-        if (bid<base){
-          fixes.push({name:p.name, bid, base, owner:p.owner});
-          p.status="open"; p.owner=null; p.finalBid=null;
-        }
-      }
-    });
-    if (fixes.length && !opts.silent){
-      const lines = fixes.map(f=>`• ${f.name}: bid ${f.bid} < base ${f.base} (owner: ${f.owner||"-"})`);
-      alert("⚠️ Invalid wins detected (below base_point). Reverted.\n\n"+lines.join("\n"));
-    }
-  }
-  const _persist = window.persist;
-  window.persist = function(){ try{enforceRosterIntegrity({silent:true});}catch(e){} return _persist.apply(this, arguments); };
-  const _render  = window.render || function(){};
-  window.render  = function(){ try{enforceRosterIntegrity({silent:true});}catch(e){} return _render.apply(this, arguments); };
-
-  // ---------- Timer + Round ----------
-  function paintTimer(){
-    const m = String(Math.floor(state.timerSec/60)).padStart(2,"0");
-    const s = String(state.timerSec%60).padStart(2,"0");
-    $("timer").textContent = `${m}:${s}`;
-  }
-  function setRound(n){ state.round=n; $("roundNo").textContent=String(n); }
-
-  // ---------- UI Rendering ----------
-  function renderPlayers(){
-    const box = $("players"); box.innerHTML="";
-    state.players.forEach(p=>{
-      const div=document.createElement("div");
-      div.className="player"+(p.id===state.activePlayerId?" active":"");
-      const pi  = toNum(p.performance_index,0);
-      const pr  = Math.round(Math.min(120, pi + (Number(p.category)===1?12:Number(p.category)===2?8:Number(p.category)===3?4:0)));
-      div.innerHTML = `<div><b>${p.name||"-"}</b></div>
-        <div class="muted">${p.alumni||p.club||""} · ${p.phone||""}</div>
-        <div class="muted">PI:${pi} · Prio:${pr} · ${String(p.skill||"-").toUpperCase()} · Cat:${p.category||"-"} · Base:${playerBase(p)}</div>
-        ${p.status==="won" ? `<div class="ok">Won by ${p.owner?.toUpperCase()} · ${p.finalBid} pts</div>` : ""}`;
-      div.addEventListener("click", ()=>{ state.activePlayerId=p.id; glueRefresh(); });
-      box.appendChild(div);
+  const out=[];
+  for (let r=1;r<rows.length;r++){
+    const c=rows[r];
+    const name=(c[i.name]||"").trim(); if(!name) continue;
+    out.push({
+      id: String(r), name,
+      alumni:(c[i.alumni]||"").trim(),
+      phone:(c[i.phone]||"").trim(),
+      skill:(c[i.skill]||"").trim(),
+      batting_type:(c[i.batting]||"").trim(),
+      bowling_type:(c[i.bowling]||"").trim(),
+      wk:(c[i.wk]||"").trim(),
+      category: toNum(c[i.cat], null),
+      base_point: toNum(c[i.base], null),
+      availability:(c[i.availability]||"").trim(),
+      performance_index: toNum(c[i.pi], null),
+      status:"open", owner:null, finalBid:null
     });
   }
-  function renderClubs(){
-    const sel = $("otherClubSelect"); sel.innerHTML="";
-    state.clubs.forEach(c=>{
-      const opt=document.createElement("option");
-      opt.value=c.slug; opt.textContent=c.name;
-      if (c.slug===state.myClubSlug) return; // skip HRB here
-      sel.appendChild(opt);
-    });
-    $("clubBudget").textContent = `HRB Remaining: ${remainingBudget(state.myClubSlug)} pts · Slots: ${remainingSlots()}`;
-  }
-  function renderActiveCard(){
-    const card=$("activePlayerCard");
-    const p=getActivePlayer();
-    if (!p){ card.textContent="Select a player…"; return; }
-    const pi  = toNum(p.performance_index,0);
-    const pr  = Math.round(Math.min(120, pi + (Number(p.category)===1?12:Number(p.category)===2?8:Number(p.category)===3?4:0)));
-    card.innerHTML = `<b>${p.name}</b><br>
-    ${p.alumni||p.club||""} · ${p.phone||""}<br>
-    ${String(p.skill||"-").toUpperCase()} · ${String(p.batting_type||p.batting||"-").toUpperCase()} · Cat:${p.category||"-"} · Base:${playerBase(p)}<br>
-    <span class="muted">PI:${pi} · Prio:${pr}</span>`;
-  }
-  function renderInsights(){
-    const p=getActivePlayer();
-    const div=$("insights"); const health=$("health");
-    if (!p){ div.textContent=""; health.textContent=""; return; }
-    const remPts = remainingBudget(state.myClubSlug);
-    const slots  = remainingSlots();
-    const pool = state.players.filter(x=>x.status!=="won");
-    const bases = pool.map(x=>playerBase(x)).sort((a,b)=>a-b);
-    const median = bases.length? bases[Math.floor(bases.length/2)] : minBase();
-    const avgPerSlot = Math.round(remPts/Math.max(1,slots));
-    let label="Healthy", cls="ok";
-    if (avgPerSlot<median) { label="Tight"; cls="warn"; }
-    if (avgPerSlot<0.6*median) { label="Risk"; cls="err"; }
-    health.innerHTML = `Remaining: <b>${remPts}</b> · Avg/slot: <b>${avgPerSlot}</b> · Median base: <b>${median}</b> · <span class="${cls}">${label}</span>`;
-    div.innerHTML = `Max safe now: <b>${window.maxYouCanSpendNow(p)}</b> · Guardrail protects remaining base floor.`;
-  }
+  return out;
+}
 
-  function renderAll(){ renderPlayers(); renderClubs(); renderActiveCard(); renderInsights(); paintTimer(); }
+async function fetchCSV(url){
+  const res = await fetch(url, { cache:"no-store" });
+  if (!res.ok) throw new Error("HTTP "+res.status);
+  return await res.text();
+}
 
-  // ---------- Glue (enable/disable buttons, input min) ----------
-  function glueRefresh(){
-    renderAll();
-    const p=getActivePlayer();
-    const btnWon=$("btn-mark-won"), warn=$("bidWarn"), input=$("bidInput");
-    if (!p){ btnWon.disabled=true; if (warn) warn.textContent="Select a player to bid."; return; }
-    input.min = String(playerBase(p));
-    if (Number(input.value||0) < playerBase(p)) input.value = String(playerBase(p));
-    const val=Number(input.value||0);
-    let ok = (val >= playerBase(p)) && window.guardrailOK(val);
-    btnWon.disabled = !ok;
-    if (!ok){
-      if (val < playerBase(p)) warn.textContent=`Enter a bid ≥ base point: ${playerBase(p)}`;
-      else warn.textContent=`Guardrail: reduce bid. You can safely spend up to ${window.maxYouCanSpendNow(p)} now.`;
-    } else {
-      warn.textContent="";
-    }
-  }
+// Export
+function downloadCSV(rows, filename){
+  const csv=rows.map(r=>r.map(v=>{const s=String(v??"");return /[\",\\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(",")).join("\\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"}); const url=URL.createObjectURL(blob);
+  const a=document.createElement("a"); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); URL.revokeObjectURL(url); a.remove();
+}
+function exportWon(){
+  const won=state.players.filter(p=>p.status==="won");
+  const rows=[["Club","Player","Alumni","Phone","Bid"]];
+  won.forEach(p=>{ const club=state.clubs.find(c=>c.slug===p.owner); rows.push([club?club.name:p.owner, p.name, p.alumni||"", p.phone||"", toNum(p.finalBid,0)]); });
+  downloadCSV(rows, "auction-won-contacts.csv");
+}
+function exportState(){
+  const rows=[[ "ID","Name","Alumni","Phone","Cat","Base","WK","Bat","Bowl","Status","Owner","Final Bid" ]];
+  state.players.forEach(p=> rows.push([p.id,p.name,p.alumni||"",p.phone||"",toNum(p.category,""),toNum(p.base_point,""),p.wk||"",p.batting_type||"",p.bowling_type||"",p.status||"",p.owner||"",toNum(p.finalBid,"")]) );
+  downloadCSV(rows, "auction-state.csv");
+}
 
-  // ---------- Event wiring ----------
-  function boot(){
-    // seed with sample players if none (ID, base_point, etc.)
-    if (!state.players.length){
-      let id=1;
-      const sample=[
-        {name:"Ajin Skariah", club:"KEA", phone:"65807053", skill:"Batting All-Rounder", batting_type:"Right Hand Bat", bowling:"Right Arm Medium", category:1, base_point:1500, performance_index:95},
-        {name:"Player B", club:"ACE", phone:"60000001", skill:"WK Batter", batting_type:"Right", category:1, base_point:1500, performance_index:82, wk:"Y"},
-        {name:"Player C", club:"TCC", phone:"60000002", skill:"Bowler", batting_type:"Left", category:2, base_point:1000, performance_index:70},
-        {name:"Player D", club:"KEA", phone:"60000003", skill:"All-rounder", batting_type:"Right", category:3, base_point:500, performance_index:65},
-        {name:"Player E", club:"ACE", phone:"60000004", skill:"Batter", batting_type:"Left", category:4, base_point:200, performance_index:50},
-      ];
-      state.players = sample.map(p=>({ id:id++, status:"open", owner:null, finalBid:null, ...p }));
-      state.activePlayerId = state.players[0].id;
-    }
+// Render root
+function render(){
+  renderPlayers(); renderLive(); renderSquad(); renderClubs(); renderCompliance(); renderHealth();
+  $("btn-undo").disabled = state.history.length===0;
+}
 
-    // Timer buttons
-    $("btn-timer-start").addEventListener("click", ()=>{ if (!window.__t){ window.__t=setInterval(()=>{ state.timerSec++; const m=String(Math.floor(state.timerSec/60)).padStart(2,"0"); const s=String(state.timerSec%60).padStart(2,"0"); $("timer").textContent=`${m}:${s}`; }, 1000); } });
-    $("btn-timer-stop").addEventListener("click", ()=>{ if (window.__t){ clearInterval(window.__t); window.__t=null; } });
-    $("btn-timer-reset").addEventListener("click", ()=>{ state.timerSec=0; const m="00", s="00"; $("timer").textContent=`${m}:${s}`; });
+function boot(){
+  // Timer wires
+  $("btn-timer-start").addEventListener("click", startTimer);
+  $("btn-timer-stop").addEventListener("click", stopTimer);
+  $("btn-timer-reset").addEventListener("click", resetTimer);
+  $("btn-undo").addEventListener("click", undo);
+  $("btn-export").addEventListener("click", exportWon);
+  $("btn-export-all").addEventListener("click", exportState);
+  paintTimer();
 
-    // Round increment on next
-    $("btn-next").addEventListener("click", ()=>{ state.round++; setRound(state.round); });
+  // CSV UI
+  $("btn-fetch").addEventListener("click", async()=>{
+    const url = $("csvUrl").value.trim(); const msg=$("csvMsg");
+    try{ msg.textContent="Fetching…"; const txt=await fetchCSV(url); $("csvText").value=txt; msg.textContent="Fetched. Click Import to load players."; }
+    catch(e){ msg.textContent="Fetch failed. Ensure the sheet is published and URL ends with output=csv."; }
+  });
+  $("btn-import").addEventListener("click", ()=>{
+    const raw = $("csvText").value;
+    const msg=$("csvMsg");
+    try{
+      const players = parsePlayersCSV(raw);
+      if (!players.length) { msg.textContent="Could not parse CSV."; return; }
+      state.players = players;
+      state.clubs.forEach(c=>{ c.starting = DEFAULT.total; c.left = DEFAULT.total; });
+      render(); msg.textContent = `Imported ${players.length} players.`;
+    }catch(e){ msg.textContent="Import failed."; }
+  });
 
-    // Bid input glue
-    $("bidInput").addEventListener("input", glueRefresh);
-
-    // HRB Won
-    $("btn-mark-won").addEventListener("click", ()=>{
-      const p=getActivePlayer(); if(!p) return;
-      const val=Number($("bidInput").value||0);
-      markWon(p.id, val);
-      glueRefresh();
-    });
-
-    // Assign to other club
-    $("btn-assign").addEventListener("click", ()=>{
-      const p=getActivePlayer(); if(!p) return;
-      const val=Number($("bidInput").value||0);
-      const clubSlug=$("otherClubSelect").value;
-      assignToClubByNameOrSlug(p.id, clubSlug, val);
-      glueRefresh();
-    });
-
-    // Undo
-    $("btn-undo").addEventListener("click", ()=>{
-      const last = state.history.pop();
-      if (!last) return;
-      const snap = JSON.parse(last).snapshot;
-      restore(snap);
-      renderAll();
-    });
-
-    renderAll();
-    console.log("boot()");
-  }
-
-  // ---------- Boot ----------
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", boot);
-  } else {
-    boot();
-  }
-})();
+  render();
+}
+document.addEventListener("DOMContentLoaded", boot);
