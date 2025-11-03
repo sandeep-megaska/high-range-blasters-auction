@@ -249,6 +249,14 @@ function renderInsights(p, whatIf=null){
           ${whoPreselected.length ? whoPreselected.map(n=>`<div>• ${n}</div>`).join("") : `<div class="hint">No rival preselect found for this player.</div>`}
         </div>
       </div>
+      const health = remainingHealth();
+html += `
+  <div class="card" style="padding:10px;flex:1;min-width:240px;">
+    <div><b>Points Health</b></div>
+    <div class="hint">Remaining: ${health.remPts} · Avg/slot: ${Math.round(health.avgPerSlot)} · Median base: ${health.median}</div>
+    <div style="margin-top:4px;color:${health.color};"><b>${health.label}</b></div>
+  </div>`;
+
     </div>
   `;
 }
