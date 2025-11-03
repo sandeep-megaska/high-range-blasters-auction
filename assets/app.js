@@ -228,6 +228,10 @@ function applyLoadedState(s) {
       const iCat = idx("category", "cat");
       const iBase = idx("base_point", "base", "basepoints", "base point");
       const iPI = idx("performance_index", "pi", "rank", "rating");
+      const iWK   = idx("wk","wicketkeeper","wicket_keeper","is_wk","keeper");
+const iBat  = idx("batting_type","batting","battingtype","bat");
+const iSkill= idx("skill","role","primary_skill","speciality");
+ 
 
       if (iName === -1 || iCat === -1 || iBase === -1) {
         throw new Error("CSV must include name, category, base_point.");
@@ -240,6 +244,10 @@ function applyLoadedState(s) {
           const rawCat = (r[iCat] || "").toString().trim().toLowerCase();
           const baseFromCsv = toInt(r[iBase], 0);
           const catBase = BaseByCategory[rawCat] ?? 0;
+           const wkRaw   = iWK   !== -1 ? String(r[iWK]).trim()   : "";
+const batRaw  = iBat  !== -1 ? String(r[iBat]).trim()  : "";
+const skillRaw= iSkill!== -1 ? String(r[iSkill]).trim(): "";
+
           const base_point = baseFromCsv > 0 ? baseFromCsv : (catBase > 0 ? catBase : TOURNAMENT_MIN_BASE);
           return {
             id: "p" + (idxr + 1),
@@ -251,6 +259,9 @@ function applyLoadedState(s) {
             performance_index: iPI !== -1 ? toInt(r[iPI], 0) : 0,
             owner: "",
             final_bid: 0
+             wk: wkRaw.toLowerCase(),
+  batting_type: batRaw.toLowerCase(),
+  skill: skillRaw.toLowerCase()
           };
         });
 
@@ -288,6 +299,35 @@ function applyLoadedState(s) {
     renderPlayers();
   });
   search.addEventListener("input", renderPlayers);
+// ---- Role predicates ----
+function isWK(p) {
+  // wk column values like "y", "yes", "true", "wk" etc.
+  const v = (p.wk || "").toLowerCase();
+  return v === "y" || v === "yes" || v === "true" || v === "wk" || v === "1";
+}
+function isLHB(p) {
+  // batting_type contains "left" or "lhb"
+  const v = (p.batting_type || "").toLowerCase();
+  return v.includes("left") || v.includes("lhb");
+}
+function isBowler(p) {
+  // skill equals/contains "bowler"
+  const v = (p.skill || "").toLowerCase();
+  return v === "bowler" || v.includes("bowler");
+}
+
+function countHRBRoles() {
+  const ids = state.clubs[MY_CLUB].won;
+  let wk = 0, lhb = 0, bowl = 0;
+  ids.forEach(pid => {
+    const p = state.players.find(x=>x.id===pid);
+    if (!p) return;
+    if (isWK(p)) wk++;
+    if (isLHB(p)) lhb++;
+    if (isBowler(p)) bowl++;
+  });
+  return { wk, lhb, bowl };
+}
 
  function renderPlayers() {
   const q = search.value.trim().toLowerCase();
@@ -544,6 +584,8 @@ function hrbVelocity() {
 
 function computeAdvice() {
   const msgs = [];
+   const rolesNow = countHRBRoles();
+
   const p = state.players.find(x => x.id === state.activeId);
   const hrb = state.clubs[MY_CLUB];
   const slots = remainingSlotsHRB();
@@ -557,7 +599,28 @@ function computeAdvice() {
     msgs.push({ level:"info", text:`Top-cat market: C1 ${cats.c1}, C2 ${cats.c2}, C3 ${cats.c3} remaining.` });
     const rv = rivalsSnapshot();
     if (rv) msgs.push({ level:"info", text:`Rival watch: ${rv.name} has ${rv.pointsLeft} pts, ${rv.leftSlots} slots, ~${rv.avgPerSlot} per slot.` });
-    return msgs;
+    // Role needs & prioritization
+const slots = remainingSlotsHRB();
+const needWK = Math.max(0, 2 - rolesNow.wk);
+const needLHB = Math.max(0, 2 - rolesNow.lhb);
+const needBOWL = Math.max(0, 8 - rolesNow.bowl);
+
+if (needWK || needLHB || needBOWL) {
+  msgs.push({ level:"warn", text:`Role needs pending → WK ${rolesNow.wk}/2, LHB ${rolesNow.lhb}/2, BOWL ${rolesNow.bowl}/8.` });
+  if (p) {
+    const flags = [];
+    if (needWK && isWK(p)) flags.push("WK");
+    if (needLHB && isLHB(p)) flags.push("LHB");
+    if (needBOWL && isBowler(p)) flags.push("BOWL");
+    if (flags.length) msgs.push({ level:"ok", text:`${p.name} fits ${flags.join(" & ")} need(s). Prioritize if budget allows.` });
+  }
+  // Gentle urgency if few slots left
+  if (slots <= 5) {
+    msgs.push({ level:"warn", text:`Only ${slots} slots left. Secure missing roles soon to avoid forced picks later.` });
+  }
+}
+
+     return msgs;
   }
 
   const base = p.base_point || TOURNAMENT_MIN_BASE;
@@ -638,13 +701,33 @@ function renderAdvisor() {
 }
 
   function updateTopBar() {
-    const hrb = state.clubs[MY_CLUB];
-    const have = hrb.won.length;
-    const leftSlots = state.squadSize - have;
-    kHrbPlayers.textContent = `${have}/${state.squadSize}`;
-    kHrbLeft.textContent = hrb.budgetLeft;
-    kGuard.textContent = TOURNAMENT_MIN_BASE * leftSlots;
+  const hrb = state.clubs[MY_CLUB];
+  const have = hrb.won.length;
+  const leftSlots = state.squadSize - have;
+
+  kHrbPlayers.textContent = `${have}/${state.squadSize}`;
+  kHrbLeft.textContent = hrb.budgetLeft;
+  kGuard.textContent = TOURNAMENT_MIN_BASE * leftSlots;
+
+  // NEW: role counts
+  const { wk, lhb, bowl } = countHRBRoles();
+  const eWK = document.getElementById("kWK");
+  const eLHB = document.getElementById("kLHB");
+  const eBOWL = document.getElementById("kBOWL");
+  const roleBox = document.getElementById("kRoleBox");
+
+  if (eWK)  eWK.textContent = wk;
+  if (eLHB) eLHB.textContent = lhb;
+  if (eBOWL) eBOWL.textContent = bowl;
+
+  // color cue on the box if any minimum not met
+  const ok = (wk >= 2) && (lhb >= 2) && (bowl >= 8);
+  if (roleBox) {
+    roleBox.style.borderColor = ok ? "#b7ebc6" : "#fde68a";
+    roleBox.style.boxShadow = ok ? "0 0 0 2px rgba(16,185,129,.12)" : "0 0 0 2px rgba(245,158,11,.10)";
   }
+}
+
 
   // ---------- capacity strip ----------
   function updateCapacity() {
