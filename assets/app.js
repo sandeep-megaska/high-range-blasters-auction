@@ -109,6 +109,8 @@
   const otherClubs = $("#otherClubs");
 
   // ---------- helpers ----------
+  
+   
    // === Persistence ============================================================
 const STORAGE_KEY = "hrbAuctionState_v2";
 
@@ -276,6 +278,7 @@ function applyLoadedState(s) {
     updateCapacity();
     renderHRB();
     renderOtherClubs();
+     renderAdvisor();
      saveState();    
   });
 
@@ -343,6 +346,7 @@ function applyLoadedState(s) {
     activeBase.textContent = p.base_point;
     inpBid.value = p.base_point;
     validateBid();
+     renderAdvisor();
 
     // highlight row
     [...playersList.querySelectorAll(".li")].forEach(x => x.classList.remove("active"));
@@ -392,6 +396,9 @@ function applyLoadedState(s) {
 
   inpBid.addEventListener("input", validateBid);
   selOtherClub.addEventListener("change", validateBid);
+   validateBid();
+renderAdvisor();
+
 
   function hrbWon(bid) {
     const p = state.players.find(x => x.id === state.activeId);
@@ -403,6 +410,7 @@ function applyLoadedState(s) {
     clearActive();
     refreshAll();
       saveState();
+     renderAdvisor();
   }
 
   function assignOther(club, bid) {
@@ -415,6 +423,7 @@ function applyLoadedState(s) {
     clearActive();
     refreshAll();
       saveState();
+     renderAdvisor();
   }
 
   function clearActive() {
@@ -486,6 +495,147 @@ function applyLoadedState(s) {
     });
     hrbSummary.textContent = `${hrb.won.length} players`;
   }
+// ---------- Smart Advisor engine ----------
+function remainingSlotsHRB() { return state.squadSize - state.clubs[MY_CLUB].won.length; }
+
+function countTopCatsRemaining() {
+  const left = state.players.filter(p => !p.owner);
+  const count = { c1:0, c2:0, c3:0 };
+  left.forEach(p => {
+    const c = (p.category||"").toLowerCase();
+    if (c.includes("1")) count.c1++;
+    else if (c.includes("2")) count.c2++;
+    else if (c.includes("3")) count.c3++;
+  });
+  return count;
+}
+
+function freeAfterGuardrailIfWin(bid) {
+  // Hard cap for this bid = current budget - 200×(slots after win)
+  const slotsAfter = Math.max(0, remainingSlotsHRB() - 1);
+  const mustKeep = TOURNAMENT_MIN_BASE * slotsAfter;
+  return state.clubs[MY_CLUB].budgetLeft - mustKeep; // this is the absolute max you can bid now (hard cap)
+}
+
+function rivalsSnapshot() {
+  // Find the most threatening rival by avg points per remaining slot
+  let top = null;
+  Object.keys(state.clubs).forEach(name => {
+    if (name === MY_CLUB) return;
+    const club = state.clubs[name];
+    const have = club.won.length;
+    const leftSlots = Math.max(0, state.squadSize - have);
+    const avgPerSlot = leftSlots > 0 ? Math.round(club.budgetLeft / leftSlots) : 0;
+    const spent = Math.max(0, state.totalPoints - club.budgetLeft);
+    if (!top || avgPerSlot > top.avgPerSlot) {
+      top = { name, avgPerSlot, leftSlots, pointsLeft: club.budgetLeft, have, spent };
+    }
+  });
+  return top;
+}
+
+function hrbVelocity() {
+  const ids = state.clubs[MY_CLUB].won.slice(-3);
+  const last = ids.map(pid => state.players.find(x=>x.id===pid)).filter(Boolean);
+  const spent3 = last.reduce((s,p)=>s + (p.final_bid||0), 0);
+  const avg3 = last.length ? Math.round(spent3 / last.length) : 0;
+  return { count: last.length, avgLast3: avg3 };
+}
+
+function computeAdvice() {
+  const msgs = [];
+  const p = state.players.find(x => x.id === state.activeId);
+  const hrb = state.clubs[MY_CLUB];
+  const slots = remainingSlotsHRB();
+
+  // Generic context numbers
+  const avgPerSlotNow = slots > 0 ? Math.round(hrb.budgetLeft / slots) : 0;
+
+  if (!p) {
+    msgs.push({ level:"info", text:`Pick a player to begin. HRB points left: ${hrb.budgetLeft}. Slots left: ${slots}. Avg/slot: ${avgPerSlotNow}.` });
+    const cats = countTopCatsRemaining();
+    msgs.push({ level:"info", text:`Top-cat market: C1 ${cats.c1}, C2 ${cats.c2}, C3 ${cats.c3} remaining.` });
+    const rv = rivalsSnapshot();
+    if (rv) msgs.push({ level:"info", text:`Rival watch: ${rv.name} has ${rv.pointsLeft} pts, ${rv.leftSlots} slots, ~${rv.avgPerSlot} per slot.` });
+    return msgs;
+  }
+
+  const base = p.base_point || TOURNAMENT_MIN_BASE;
+  const bid = toInt(inpBid.value, 0);
+
+  // Base enforcement
+  if (!Number.isFinite(bid) || bid < base) {
+    msgs.push({ level:"bad", text:`Min starting bid for ${p.name} is ${base} (player base).` });
+  }
+
+  // Guardrail / caps
+  const hardCapNow = freeAfterGuardrailIfWin(0); // equals max allowed bid right now
+  const safeCap = Math.min(hardCapNow, Math.round(avgPerSlotNow * 1.5)); // soft ceiling
+  const slotsAfter = Math.max(0, slots - 1);
+  const leftIfWin = hrb.budgetLeft - bid;
+  const mustKeepAfter = TOURNAMENT_MIN_BASE * slotsAfter;
+
+  if (bid > hardCapNow) {
+    msgs.push({ level:"bad", text:`Bid exceeds hard cap ${hardCapNow}. Keep ≥ ${mustKeepAfter} for ${slotsAfter} slots.` });
+  } else if (leftIfWin < mustKeepAfter) {
+    msgs.push({ level:"warn", text:`This bid leaves ${leftIfWin} < guardrail ${mustKeepAfter}. Reduce bid or skip.` });
+  } else {
+    msgs.push({ level:"ok", text:`Within guardrail. Hard cap: ${hardCapNow}. Suggested soft cap: ~${safeCap}.` });
+  }
+
+  // Category scarcity
+  const cats = countTopCatsRemaining();
+  const catKey = (p.category||"").toLowerCase();
+  if (catKey.includes("1") && cats.c1 <= Math.max(3, slots)) {
+    msgs.push({ level:"warn", text:`Scarcity: only ${cats.c1} Cat-1 remain. If ${p.name} fits HRB needs, prioritize.` });
+  } else if (catKey.includes("2") && cats.c2 <= Math.max(4, Math.ceil(slots*1.2))) {
+    msgs.push({ level:"info", text:`Market tightness: ${cats.c2} Cat-2 remain. Consider a firm stance.` });
+  } else if (catKey.includes("3") && cats.c3 <= Math.max(5, Math.ceil(slots*1.5))) {
+    msgs.push({ level:"info", text:`Cat-3 remaining: ${cats.c3}. Balance value vs. depth.` });
+  }
+
+  // Top-cat capacity at base (quick feasibility)
+  const mustKeepNow = TOURNAMENT_MIN_BASE * slots;
+  const freeForAggressive = Math.max(0, hrb.budgetLeft - mustKeepNow);
+  const capC1 = Math.floor(freeForAggressive / 1500);
+  const capC2 = Math.floor(freeForAggressive / 1000);
+  const capC3 = Math.floor(freeForAggressive / 500);
+  msgs.push({ level:"info", text:`With current points, you could still afford at base (keeping guardrail): C1 ${Math.min(capC1, cats.c1, slots)}, C2 ${Math.min(capC2, cats.c2, slots)}, C3 ${Math.min(capC3, cats.c3, slots)}.` });
+
+  // Rival pressure
+  const rv = rivalsSnapshot();
+  if (rv) {
+    msgs.push({ level:"info", text:`Rival watch: ${rv.name} ~${rv.avgPerSlot}/slot with ${rv.pointsLeft} pts. Expect push near ${Math.min(rv.avgPerSlot*1.2|0, hardCapNow)}.` });
+  }
+
+  // HRB spend velocity
+  const vel = hrbVelocity();
+  if (vel.count >= 2 && vel.avgLast3 > avgPerSlotNow * 1.3) {
+    msgs.push({ level:"warn", text:`Your last wins avg ~${vel.avgLast3}, above current avg/slot ${avgPerSlotNow}. Risk of late squeeze — tighten bids.` });
+  }
+
+  // Micro recommendation (next raise)
+  let step = 25;
+  if (catKey.includes("1") || catKey.includes("2")) step = 50;
+  const next = Math.min(hardCapNow, Math.max(base, bid + step));
+  msgs.push({ level:"ok", text:`Suggested next bid: ${next} (step ${step}). Keep hard cap ${hardCapNow}, soft ~${safeCap}.` });
+
+  // Quick summary line
+  msgs.push({ level:"info", text:`HRB: ${hrb.budgetLeft} pts, ${slots} slots → ~${avgPerSlotNow}/slot. If you win at ${bid}, left ${leftIfWin} → ~${slotsAfter>0?Math.round(leftIfWin/slotsAfter):0}/slot.` });
+
+  return msgs;
+}
+
+function renderAdvisor() {
+  const box = document.getElementById("advisorBox");
+  if (!box) return;
+  const msgs = computeAdvice();
+  box.innerHTML = "";
+  msgs.forEach(m => {
+    const cls = ["advice", m.level].join(" ");
+    box.appendChild(el("div", { class: cls }, [ document.createTextNode(m.text) ]));
+  });
+}
 
   function updateTopBar() {
     const hrb = state.clubs[MY_CLUB];
@@ -623,6 +773,7 @@ function applyLoadedState(s) {
     updateTopBar();
     updateCapacity();
     renderOtherClubs();
+     
   }
 
   // ---------- init ----------
@@ -640,6 +791,7 @@ if (restored && restored.players && Object.keys(restored.clubs||{}).length) {
       settingsCard.style.display = "none";
       liveCard.style.display = "block";
       refreshAll();
+       renderAdvisor();
       // restore active highlight if any
       if (state.activeId) setActive(state.activeId);
     } else {
