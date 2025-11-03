@@ -430,7 +430,7 @@
           ])
         ])
       );
-    });
+    );
 
     // Header matches HRB card style: title on left, tiny status on right
     const header = el("div", { class: "titlebar" }, [
