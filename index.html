@@ -54,7 +54,7 @@
       <div class="grid2">
         <div>
           <label class="tiny muted">Club (fixed)</label>
-          <input id="loginUser" value="HRB" readonly />
+          <input id="loginUser" value="High Range Blasters" readonly />
         </div>
         <div>
           <label class="tiny muted">Password</label>
@@ -71,7 +71,7 @@
     <!-- SETTINGS -->
     <div id="settingsCard" class="card stack" style="display:none;">
       <div class="titlebar">
-        <div><b>Pre-Auction Settings (HRB)</b></div>
+        <div><b>Pre-Auction Settings (High Range Blasters)</b></div>
         <div class="kpi">
           <div class="box"><div class="tiny muted">Squad Size</div><div class="n" id="kSquad">15</div></div>
           <div class="box"><div class="tiny muted">Total Points</div><div class="n" id="kPoints">15000</div></div>
@@ -170,11 +170,8 @@
 
             <div class="flex">
               <button id="btnHrbWon" class="btn primary" disabled>HRB WON</button>
-              <select id="selOtherClub">
-                <option value="">Assign to other club…</option>
-                <option>ALPHA</option><option>BRAVO</option><option>CHARLIE</option><option>DELTA</option>
-                <option>EAGLES</option><option>FALCONS</option><option>ROYALS</option>
-              </select>
+              <!-- options injected dynamically from app.js -->
+              <select id="selOtherClub"></select>
               <button id="btnAssignOther" class="btn" disabled>Assign</button>
             </div>
           </div>
