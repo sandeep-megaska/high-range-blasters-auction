@@ -72,13 +72,36 @@
 .wrap.theme-dark .card {
   color: var(--text);    /* back to normal inside cards */
 }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.brand-logo {
+  height: 32px;           /* tweak as you like: 24–40px works well */
+  width: auto;
+  display: block;
+}
+
+/* If you’re using the black wrapper (theme-dark), ensure the logo is visible.
+   If your SVG is dark-on-light, uncomment the invert line below. */
+/*
+.wrap.theme-dark .brand-logo {
+  filter: invert(1);
+}
+*/
 
   </style>
 </head>
 <body>
   <div class="wrap theme-dark">
 
-    <h1>HRB Auction Assist</h1>
+   <div class="brand">
+  <img src="assets/highrange.svg" alt="High Range Blasters" class="brand-logo" />
+  <h1>HRB Auction Assist</h1>
+</div>
+
 
     <!-- LOGIN -->
     <div id="loginCard" class="card stack">
