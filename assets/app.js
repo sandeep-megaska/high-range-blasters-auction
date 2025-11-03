@@ -609,7 +609,35 @@ function applyLoadedState(s) {
   }
 
   // ---------- init ----------
-  populateOtherClubSelect();
+ // ---------- init ----------
+populateOtherClubSelect();
+
+const restored = loadState();
+if (restored && restored.players && Object.keys(restored.clubs||{}).length) {
+  applyLoadedState(restored);
+
+  if (state.loggedIn) {
+    // jump to appropriate screen
+    if (state.players.length > 0) {
+      loginCard.style.display = "none";
+      settingsCard.style.display = "none";
+      liveCard.style.display = "block";
+      refreshAll();
+      // restore active highlight if any
+      if (state.activeId) setActive(state.activeId);
+    } else {
+      loginCard.style.display = "none";
+      settingsCard.style.display = "block";
+      renderPlayers();
+    }
+  } else {
+    // not logged in – show login
+    renderPlayers();
+  }
+} else {
+  // fresh session
   renderPlayers();
   renderHRB();
+}
+
 })();
