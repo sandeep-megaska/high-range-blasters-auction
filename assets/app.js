@@ -64,7 +64,8 @@
           category: p.category, base_point: p.base_point,
           performance_index: p.performance_index,
           owner: p.owner, final_bid: p.final_bid,
-          wk: p.wk || "", batting_type: p.batting_type || "", skill: p.skill || ""
+          wk: p.wk || "", batting_type: p.batting_type || "", skill: p.skill || "",
+           player_rating: p.player_rating ?? 0 
         })),
         clubs: Object.fromEntries(Object.keys(state.clubs).map(k => [
           k,
@@ -123,6 +124,7 @@
   const liveCard = $("#liveCard");
   const loginPass = $("#loginPass");
   const btnLogin = $("#btnLogin");
+const kRating = $("#kRating");
 
   const csvUrl = $("#csvUrl");
   const csvPaste = $("#csvPaste");
@@ -258,6 +260,7 @@
       const iWK   = idx("wk","wicketkeeper","wicket_keeper","is_wk","keeper");
       const iBat  = idx("batting_type","batting","battingtype","bat");
       const iSkill= idx("skill","role","primary_skill","speciality");
+       const iRating = idx("player_rating","rating","rate","score");
 
       if (iName === -1 || iCat === -1 || iBase === -1) {
         throw new Error("CSV must include name, category, base_point.");
@@ -271,7 +274,8 @@
           const baseFromCsv = toInt(r[iBase], 0);
           const catBase = BaseByCategory[rawCat] ?? 0;
           const base_point = baseFromCsv > 0 ? baseFromCsv : (catBase > 0 ? catBase : TOURNAMENT_MIN_BASE);
-
+         const ratingRaw = iRating !== -1 ? toInt(r[iRating], 0) : 0;
+const player_rating = Math.max(0, Math.min(10, ratingRaw));
           const wkRaw    = iWK   !== -1 ? String(r[iWK]).trim()    : "";
           const batRaw   = iBat  !== -1 ? String(r[iBat]).trim()   : "";
           const skillRaw = iSkill!== -1 ? String(r[iSkill]).trim() : "";
@@ -289,6 +293,7 @@
             wk: wkRaw.toLowerCase(),
             batting_type: batRaw.toLowerCase(),
             skill: skillRaw.toLowerCase()
+             player_rating
           };
         });
 
@@ -380,6 +385,8 @@
     activeName.textContent = p.name;
     activeCat.textContent = (p.category || "").toUpperCase();
     activeBase.textContent = p.base_point;
+     kRating && (kRating.textContent = (p.player_rating ?? 0));
+
     inpBid.value = p.base_point;
     validateBid();
     renderAdvisor();
@@ -467,6 +474,8 @@
     activeName.textContent = "—";
     activeCat.textContent = "—";
     activeBase.textContent = "—";
+     kRating && (kRating.textContent = "—");
+
     inpBid.value = "";
     bidHint.textContent = "Select a player to begin.";
   }
@@ -649,6 +658,11 @@
 
     const base = p.base_point || TOURNAMENT_MIN_BASE;
     const bid = toInt(inpBid.value, 0);
+const rating = p.player_rating ?? 0;
+if (rating >= 6) {
+  // Strong nudge; still respect guardrail and base logic shown below.
+  msgs.push({ level:"ok", text:`Must-bid candidate: ${p.name} rated ${rating}/10.` });
+}
 
     if (!Number.isFinite(bid) || bid < base) {
       msgs.push({ level:"bad", text:`Min starting bid for ${p.name} is ${base} (player base).` });
