@@ -292,7 +292,7 @@ const player_rating = Math.max(0, Math.min(10, ratingRaw));
             final_bid: 0,
             wk: wkRaw.toLowerCase(),
             batting_type: batRaw.toLowerCase(),
-            skill: skillRaw.toLowerCase()
+            skill: skillRaw.toLowerCase(),
              player_rating
           };
         });
