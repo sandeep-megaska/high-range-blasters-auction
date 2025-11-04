@@ -185,9 +185,15 @@
     const v = (p.batting_type || "").toLowerCase();
     return v.includes("left") || v.includes("lhb");
   }
-  function isBowler(p) {
-    const v = (p.skill || "").toLowerCase();
-    return v === "bowler" || v.includes("bowler");
+ function isBowler(p) {
+  // Normalize and match common variants:
+  // "bowler", "bowling all rounder", "bowling all-rounder", "all-rounder (bowling)", etc.
+  const v = (p.skill || "").toLowerCase();
+  return /\bbowler\b/.test(v) ||
+         /bowling\s*all[-\s]?rounder/.test(v) ||
+         /all[-\s]?rounder.*bowling/.test(v);
+}
+;
   }
   function countHRBRoles() {
     const ids = state.clubs[MY_CLUB].won;
