@@ -193,8 +193,6 @@
          /bowling\s*all[-\s]?rounder/.test(v) ||
          /all[-\s]?rounder.*bowling/.test(v);
 }
-;
-  }
   function countHRBRoles() {
     const ids = state.clubs[MY_CLUB].won;
     let wk = 0, lhb = 0, bowl = 0;
