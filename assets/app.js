@@ -772,8 +772,7 @@ club.won.slice().reverse().forEach(pid => {
       style: "display:flex;justify-content:space-between;align-items:center;"
     }, [
      el("div", { class: "tiny" }, [ document.createTextNode(p.name) ]),
-      el("div", { class: "tiny muted" }, [ document.createTextNode(String(p.final_bid)) ])
-    ])
+      el("div", { class: "tiny muted" },)
   );
 });
 
