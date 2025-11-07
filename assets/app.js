@@ -741,78 +741,49 @@ if (rating >= 6) {
   }
 
   // ---------- other clubs (rich headers) ----------
-  function renderOtherClubs() {
-    otherClubs.innerHTML = "";
+ function renderOtherClubs() {
+  otherClubs.innerHTML = "";
+  const totalPts = state.totalPoints;
 
-    const totalPts = state.totalPoints;
+  CLUB_NAMES.filter(c => c !== MY_CLUB).forEach(c => {
+    const club = state.clubs[c];
+    const have = club.won.length;
+    const leftSlots = Math.max(0, state.squadSize - have);
+    const spent = Math.max(0, totalPts - club.budgetLeft);
+    const avgWin = have > 0 ? Math.round(spent / have) : 0;
+    const avgPerSlot = leftSlots > 0 ? Math.round(club.budgetLeft / leftSlots) : 0;
 
-    CLUB_NAMES.filter(c => c !== MY_CLUB).forEach(c => {
-      const club = state.clubs[c];
-      const have = club.won.length;
-      const leftSlots = Math.max(0, state.squadSize - have);
-      const spent = Math.max(0, totalPts - club.budgetLeft);
-      const avgWin = have > 0 ? Math.round(spent / have) : 0;
-      const avgPerSlot = leftSlots > 0 ? Math.round(club.budgetLeft / leftSlots) : 0;
+    // Header
+    const header = el("div", { class: "titlebar club-header" }, [
+      el("div", {}, [document.createTextNode(c)]),
+      el("div", { class: "titlebar-right" }, [
+        document.createTextNode(`Players ${have}/${state.squadSize} • Points Left ${club.budgetLeft} • Avg/slot ${avgPerSlot}`)
+      ])
+    ]);
+    const sub = el("div", { class: "titlebar-sub" }, [
+      document.createTextNode(`Spent ${spent} • Avg win ${avgWin}`)
+    ]);
 
-      const last3 = club.won.slice(-3).map(pid => state.players.find(x => x.id === pid)).filter(Boolean);
-      const chips = el("div", { class: "chips" });
-      last3.slice().reverse().forEach(p => {
-        chips.appendChild(el("div", { class: "chip" }, [
-          document.createTextNode(`${p.name} — ${p.final_bid}`)
-        ]));
-      });
-  // ---- FULL PLAYER LIST (compact: one line "name  —  bid") ----
-// Compact one-line "Name — [BID pill]"
-const list = el("div", { class: "list other-compact" });
-club.won.slice().reverse().forEach(pid => {
-  const p = state.players.find(x => x.id === pid); if (!p) return;
-  list.appendChild(
-    el("div", { class: "li", style:"display:flex;justify-content:space-between;align-items:center;gap:8px;" }, [
-      el("div", { class: "nm", style:"font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, [
-        document.createTextNode(p.name)
-      ]),
-      el("span", { class: "pill" }, [ document.createTextNode(String(p.final_bid)) ])
-    ])
-  );
-});
-
-
-    
-      const header = el("div", { class: "titlebar club-header" }, [
-        el("div", {}, [document.createTextNode(c)]),
-        el("div", { class: "titlebar-right" }, [
-          document.createTextNode(`Players ${have}/${state.squadSize} • Points Left ${club.budgetLeft} • Avg/slot ${avgPerSlot}`)
+    // Compact one-line list: Name — [BID pill]
+    const list = el("div", { class: "list other-compact" });
+    club.won.slice().reverse().forEach(pid => {
+      const p = state.players.find(x => x.id === pid); if (!p) return;
+      list.appendChild(
+        el("div", { class: "li", style:"display:flex;justify-content:space-between;align-items:center;gap:8px;" }, [
+          el("div", { class: "nm", style:"font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, [
+            document.createTextNode(p.name)
+          ]),
+          el("span", { class: "pill" }, [ document.createTextNode(String(p.final_bid)) ])
         ])
-      ]);
-      const sub = el("div", { class: "titlebar-sub" }, [
-        document.createTextNode(`Spent ${spent} • Avg win ${avgWin}`)
-      ]);
-
-      const card = el("div", { class: "card stack" }, [header, sub, chips, list]);
-      otherClubs.appendChild(card);
+      );
     });
-  }
 
-  // ---------- export & logout ----------
-  btnExportWon.addEventListener("click", () => {
-    const header = ["Club", "Player", "Alumni", "Phone", "Category", "FinalBid"];
-    const lines = [header.join(",")];
-    state.players.filter(p => p.owner).forEach(p => {
-      lines.push([p.owner, p.name, p.alumni || "", p.phone || "", (p.category || "").toUpperCase(), p.final_bid].join(","));
-    });
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = el("a", { href: url, download: "auction_wins.csv" });
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1200);
-    a.remove();
+    // No chips here 👇
+    const card = el("div", { class: "card stack" }, [header, sub, list]);
+    otherClubs.appendChild(card);
   });
+}
 
-  btnLogout.addEventListener("click", () => {
-    localStorage.removeItem(STORAGE_KEY);
-    location.reload();
-  });
 
   // ---------- refresh helpers ----------
   function refreshAll() {
