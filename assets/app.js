@@ -162,6 +162,29 @@ const kRating = $("#kRating");
   const btnLogout = $("#btnLogout");
   const otherClubs = $("#otherClubs");
   const advisorBox = $("#advisorBox");
+function onExportWon() {
+  const header = ["Club","Player","Alumni","Phone","Category","FinalBid"];
+  const lines = [header.join(",")];
+  state.players.filter(p => p.owner).forEach(p => {
+    lines.push([p.owner, p.name, p.alumni || "", p.phone || "", (p.category || "").toUpperCase(), p.final_bid].join(","));
+  });
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: "auction_wins.csv" });
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1200);
+  a.remove();
+}
+
+function onLogout() {
+  localStorage.removeItem(STORAGE_KEY);
+  location.reload();
+}
+
+// bind early (so they’re always active)
+if (btnExportWon) btnExportWon.addEventListener("click", onExportWon);
+if (btnLogout) btnLogout.addEventListener("click", onLogout);
 
   // role top bar refs (added in HTML)
   const kWK = $("#kWK"), kLHB = $("#kLHB"), kBOWL = $("#kBOWL");
@@ -778,7 +801,6 @@ if (rating >= 6) {
       );
     });
 
-    // No chips here 👇
     const card = el("div", { class: "card stack" }, [header, sub, list]);
     otherClubs.appendChild(card);
   });
