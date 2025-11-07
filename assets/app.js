@@ -667,38 +667,42 @@ const player_rating = Math.max(0, Math.min(10, ratingRaw));
     return state.clubs[MY_CLUB].budgetLeft - mustKeep;
   }
   function computeAdvice() {
-    const msgs = [];
-    const p = state.players.find(x => x.id === state.activeId);
-    const hrb = state.clubs[MY_CLUB];
-    const slots = remainingSlotsHRB();
-    const rolesNow = countHRBRoles();
+  const msgs = [];
+  const hrb = state.clubs[MY_CLUB];
+  const slots = remainingSlotsHRB();
+  const rolesNow = countHRBRoles();
+  const avgPerSlotNow = slots > 0 ? Math.round(hrb.budgetLeft / slots) : 0;
 
-    const avgPerSlotNow = slots > 0 ? Math.round(hrb.budgetLeft / slots) : 0;
+  // currently selected player (may be null)
+  const p = state.players.find(x => x.id === state.activeId) || null;
 
-    if (!p) {
-      msgs.push({ level:"info", text:`Pick a player to begin. HRB points left: ${hrb.budgetLeft}. Slots left: ${slots}. Avg/slot: ${avgPerSlotNow}.` });
-      const cats = countTopCatsRemaining();
-      msgs.push({ level:"info", text:`Top-cat market: C1 ${cats.c1}, C2 ${cats.c2}, C3 ${cats.c3} remaining.` });
-      const rv = rivalsSnapshot();
-      if (rv) msgs.push({ level:"info", text:`Rival watch: ${rv.name} has ${rv.pointsLeft} pts, ${rv.leftSlots} slots, ~${rv.avgPerSlot} per slot.` });
-      if (rolesNow.wk<2 || rolesNow.lhb<2 || rolesNow.bowl<8) {
-        msgs.push({ level:"warn", text:`Role needs pending → WK ${rolesNow.wk}/2, LHB ${rolesNow.lhb}/2, BOWL ${rolesNow.bowl}/8.` });
-      }
-     
+  if (!p) {
+    // General context when nothing is selected
+    msgs.push({ level:"info", text:`Pick a player to begin. HRB points left: ${hrb.budgetLeft}. Slots left: ${slots}. Avg/slot: ${avgPerSlotNow}.` });
+    const cats0 = countTopCatsRemaining();
+    msgs.push({ level:"info", text:`Top-cat market: C1 ${cats0.c1}, C2 ${cats0.c2}, C3 ${cats0.c3} remaining.` });
+    const rv0 = rivalsSnapshot();
+    if (rv0) msgs.push({ level:"info", text:`Rival watch: ${rv0.name} has ${rv0.pointsLeft} pts, ${rv0.leftSlots} slots, ~${rv0.avgPerSlot} per slot.` });
+    if (rolesNow.wk<2 || rolesNow.lhb<2 || rolesNow.bowl<8) {
+      msgs.push({ level:"warn", text:`Role needs pending → WK ${rolesNow.wk}/2, LHB ${rolesNow.lhb}/2, BOWL ${rolesNow.bowl}/8.` });
     }
-
+  } else {
+    // Player-specific analysis
     const base = p.base_point || TOURNAMENT_MIN_BASE;
     const bid = toInt(inpBid.value, 0);
-const rating = p.player_rating ?? 0;
-if (rating >= 6) {
-  // Strong nudge; still respect guardrail and base logic shown below.
-  msgs.push({ level:"ok", text:`Must-bid candidate: ${p.name} rated ${rating}/10.` });
-}
 
+    // rating cue
+    const rating = p.player_rating ?? 0;
+    if (rating >= 6) {
+      msgs.push({ level:"ok", text:`Must-bid candidate: ${p.name} rated ${rating}/10.` });
+    }
+
+    // base validation
     if (!Number.isFinite(bid) || bid < base) {
       msgs.push({ level:"bad", text:`Min starting bid for ${p.name} is ${base} (player base).` });
     }
 
+    // guardrail & caps
     const hardCapNow = freeAfterGuardrailIfWin();
     const safeCap = Math.min(hardCapNow, Math.round(avgPerSlotNow * 1.5));
     const slotsAfter = Math.max(0, slots - 1);
@@ -713,6 +717,7 @@ if (rating >= 6) {
       msgs.push({ level:"ok", text:`Within guardrail. Hard cap: ${hardCapNow}. Suggested soft cap: ~${safeCap}.` });
     }
 
+    // category scarcity
     const cats = countTopCatsRemaining();
     const catKey = (p.category||"").toLowerCase();
     if (catKey.includes("1") && cats.c1 <= Math.max(3, slots)) {
@@ -723,6 +728,7 @@ if (rating >= 6) {
       msgs.push({ level:"info", text:`Cat-3 remaining: ${cats.c3}. Balance value vs. depth.` });
     }
 
+    // afford-at-base summary
     const mustKeepNow = TOURNAMENT_MIN_BASE * slots;
     const freeForAggressive = Math.max(0, hrb.budgetLeft - mustKeepNow);
     const capC1 = Math.floor(freeForAggressive / 1500);
@@ -730,16 +736,17 @@ if (rating >= 6) {
     const capC3 = Math.floor(freeForAggressive / 500);
     msgs.push({ level:"info", text:`At base (keeping guardrail): C1 ${Math.min(capC1, cats.c1, slots)}, C2 ${Math.min(capC2, cats.c2, slots)}, C3 ${Math.min(capC3, cats.c3, slots)}.` });
 
+    // rival pressure
     const rv = rivalsSnapshot();
-    if (rv) {
-      msgs.push({ level:"info", text:`Rival watch: ${rv.name} ~${rv.avgPerSlot}/slot with ${rv.pointsLeft} pts. Expect push near ${Math.min((rv.avgPerSlot*1.2)|0, hardCapNow)}.` });
-    }
+    if (rv) msgs.push({ level:"info", text:`Rival watch: ${rv.name} ~${rv.avgPerSlot}/slot with ${rv.pointsLeft} pts. Expect push near ${Math.min((rv.avgPerSlot*1.2)|0, hardCapNow)}.` });
 
+    // spend velocity
     const vel = hrbVelocity();
     if (vel.count >= 2 && vel.avgLast3 > avgPerSlotNow * 1.3) {
       msgs.push({ level:"warn", text:`Your last wins avg ~${vel.avgLast3}, above current avg/slot ${avgPerSlotNow}. Risk of late squeeze — tighten bids.` });
     }
 
+    // role needs
     const needWK = Math.max(0, 2 - rolesNow.wk);
     const needLHB = Math.max(0, 2 - rolesNow.lhb);
     const needBOWL = Math.max(0, 8 - rolesNow.bowl);
@@ -753,32 +760,31 @@ if (rating >= 6) {
       if (slots <= 5) msgs.push({ level:"warn", text:`Only ${slots} slots left. Secure missing roles soon to avoid forced picks later.` });
     }
 
+    // suggested next raise
     let step = 25;
     if (catKey.includes("1") || catKey.includes("2")) step = 50;
     const next = Math.min(hardCapNow, Math.max(base, bid + step));
     msgs.push({ level:"ok", text:`Suggested next bid: ${next} (step ${step}). Keep hard cap ${hardCapNow}, soft ~${safeCap}.` });
 
+    // quick numbers line
     msgs.push({ level:"info", text:`HRB: ${hrb.budgetLeft} pts, ${slots} slots → ~${avgPerSlotNow}/slot. If you win at ${bid}, left ${leftIfWin} → ~${slotsAfter>0?Math.round(leftIfWin/slotsAfter):0}/slot.` });
-   
-    // --- Max bid per club (guardrail-aware), shown always ---
-const capsAll = CLUB_NAMES.map(n => ({
-  name: n,
-  cap: Math.max(0, Math.round(clubHardCap(n)))
-})).sort((a,b) => b.cap - a.cap);
-
-// Header line
-msgs.push({ level: "info", text: "Max bid per club (guardrail-aware):" });
-
-// One line per club (HRB highlighted green, very low caps highlighted amber)
-capsAll.forEach(x => {
-  const lvl = (x.name === MY_CLUB) ? "ok" : (x.cap < 1000 ? "warn" : "info");
-  msgs.push({ level: lvl, text: `${x.name}: ${x.cap}` });
-});
-
-
-
-return msgs;
   }
+
+  // === ALWAYS append club max-bid (guardrail-aware), even with no selection ===
+  const capsAll = CLUB_NAMES.map(n => ({
+    name: n,
+    cap: Math.max(0, Math.round(clubHardCap(n)))
+  })).sort((a,b) => b.cap - a.cap);
+
+  msgs.push({ level: "info", text: "Max bid per club (guardrail-aware):" });
+  capsAll.forEach(x => {
+    const lvl = (x.name === MY_CLUB) ? "ok" : (x.cap < 1000 ? "warn" : "info");
+    msgs.push({ level: lvl, text: `${x.name}: ${x.cap}` });
+  });
+
+  return msgs;
+}
+
   function renderAdvisor() {
     if (!advisorBox) return;
     const msgs = computeAdvice();
