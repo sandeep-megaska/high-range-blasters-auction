@@ -769,7 +769,7 @@ const list = el("div", { class: "list" });
         list.appendChild(el("div", { class: "li" }, [
           ,
           el("div", { class: "right" }, [
-            el("span", { class: "pill" }, [document.createTextNode(`${(p.category || "").toUpperCase()}`)])  
+            el("span", { class: "pill" }, )  
           ])
         ]));
       });
