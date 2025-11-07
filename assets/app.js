@@ -762,18 +762,7 @@ if (rating >= 6) {
         ]));
       });
 
-      // ---- FULL PLAYER LIST (compact: one line "name  —  bid") ----
-const list = el("div", { class: "list" });
-      club.won.slice().reverse().forEach(pid => {
-        const p = state.players.find(x => x.id === pid); if (!p) return;
-        list.appendChild(el("div", { class: "li" }, [
-          ,
-          el("div", { class: "right" }, [
-            el("span", { class: "pill" }, )  
-          ])
-        ]));
-      });
-
+    
       const header = el("div", { class: "titlebar club-header" }, [
         el("div", {}, [document.createTextNode(c)]),
         el("div", { class: "titlebar-right" }, [
