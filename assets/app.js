@@ -770,7 +770,7 @@ club.won.slice().reverse().forEach(pid => {
     el("div", { class: "right" }, [
             el("span", { class: "pill" }, [document.createTextNode(`${(p.category || "").toUpperCase()}`)]),
             el("div", { class: "tiny muted" }, [document.createTextNode(`Bid: ${p.final_bid}`)])
-          ])
+          ]))
         ]));
       });
 
