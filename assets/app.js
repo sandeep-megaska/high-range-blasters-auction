@@ -762,22 +762,21 @@ if (rating >= 6) {
         ]));
       });
 
-      const list = el("div", { class: "list" });
-      club.won.slice().reverse().forEach(pid => {
-        const p = state.players.find(x => x.id === pid); if (!p) return;
-        list.appendChild(el("div", { class: "li" }, [
-          el("div", {}, [
-            el("div", {}, [document.createTextNode(p.name)]),
-            el("div", { class: "tiny muted" }, [
-              document.createTextNode(`${p.alumni || ""}  • ${p.phone || ""}`)
-            ])
-          ]),
-          el("div", { class: "right" }, [
-            el("span", { class: "pill" }, [document.createTextNode(`${(p.category || "").toUpperCase()}`)]),
-            el("div", { class: "tiny muted" }, [document.createTextNode(`Bid: ${p.final_bid}`)])
-          ])
-        ]));
-      });
+      // ---- FULL PLAYER LIST (compact: one line "name  —  bid") ----
+const list = el("div", { class: "list other-compact" });
+club.won.slice().reverse().forEach(pid => {
+  const p = state.players.find(x => x.id === pid); if (!p) return;
+  list.appendChild(
+    el("div", {
+      class: "li",
+      style: "display:flex;justify-content:space-between;align-items:center;"
+    }, [
+      el("div", { class: "tiny" }, [ document.createTextNode(p.name) ]),
+      el("div", { class: "tiny muted" }, [ document.createTextNode(String(p.final_bid)) ])
+    ])
+  );
+});
+
 
       const header = el("div", { class: "titlebar club-header" }, [
         el("div", {}, [document.createTextNode(c)]),
