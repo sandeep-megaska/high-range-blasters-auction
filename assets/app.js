@@ -760,7 +760,21 @@ if (rating >= 6) {
 
     msgs.push({ level:"info", text:`HRB: ${hrb.budgetLeft} pts, ${slots} slots → ~${avgPerSlotNow}/slot. If you win at ${bid}, left ${leftIfWin} → ~${slotsAfter>0?Math.round(leftIfWin/slotsAfter):0}/slot.` });
    
-     // --- Rival guardrail caps under 1000 ---
+    // --- Max bid per club (guardrail-aware), shown always ---
+const capsAll = CLUB_NAMES.map(n => ({
+  name: n,
+  cap: Math.max(0, Math.round(clubHardCap(n)))
+})).sort((a,b) => b.cap - a.cap);
+
+// Header line
+msgs.push({ level: "info", text: "Max bid per club (guardrail-aware):" });
+
+// One line per club (HRB highlighted green, very low caps highlighted amber)
+capsAll.forEach(x => {
+  const lvl = (x.name === MY_CLUB) ? "ok" : (x.cap < 1000 ? "warn" : "info");
+  msgs.push({ level: lvl, text: `${x.name}: ${x.cap}` });
+});
+
 
 
 return msgs;
