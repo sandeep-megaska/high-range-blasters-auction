@@ -666,27 +666,27 @@ const player_rating = Math.max(0, Math.min(10, ratingRaw));
     const mustKeep = TOURNAMENT_MIN_BASE * slotsAfter;
     return state.clubs[MY_CLUB].budgetLeft - mustKeep;
   }
-  function computeAdvice() {
+ function computeAdvice() {
   const msgs = [];
   const hrb = state.clubs[MY_CLUB];
   const slots = remainingSlotsHRB();
   const rolesNow = countHRBRoles();
   const avgPerSlotNow = slots > 0 ? Math.round(hrb.budgetLeft / slots) : 0;
+  const mustKeepNow = TOURNAMENT_MIN_BASE * slots;
 
-  // currently selected player (may be null)
   const p = state.players.find(x => x.id === state.activeId) || null;
 
   if (!p) {
-    // General context when nothing is selected
-    msgs.push({ level:"info", text:`Pick a player to begin. HRB points left: ${hrb.budgetLeft}. Slots left: ${slots}. Avg/slot: ${avgPerSlotNow}.` });
-    const cats0 = countTopCatsRemaining();
-    msgs.push({ level:"info", text:`Top-cat market: C1 ${cats0.c1}, C2 ${cats0.c2}, C3 ${cats0.c3} remaining.` });
-    const rv0 = rivalsSnapshot();
-    if (rv0) msgs.push({ level:"info", text:`Rival watch: ${rv0.name} has ${rv0.pointsLeft} pts, ${rv0.leftSlots} slots, ~${rv0.avgPerSlot} per slot.` });
-    if (rolesNow.wk<2 || rolesNow.lhb<2 || rolesNow.bowl<8) {
-      msgs.push({ level:"warn", text:`Role needs pending → WK ${rolesNow.wk}/2, LHB ${rolesNow.lhb}/2, BOWL ${rolesNow.bowl}/8.` });
+    // ... your existing messages ...
+
+    // NEW: global guardrail breach / risk
+    if (hrb.budgetLeft < mustKeepNow) {
+      msgs.push({ level:"bad", text:`Guardrail breached now: need ≥ ${mustKeepNow}, have ${hrb.budgetLeft}. Future bids must be conservative.` });
+    } else if (avgPerSlotNow < TOURNAMENT_MIN_BASE && slots > 0) {
+      msgs.push({ level:"warn", text:`Risk: avg per remaining slot ~${avgPerSlotNow} < ${TOURNAMENT_MIN_BASE}. Target lower-base players until it recovers.` });
     }
-  } else {
+
+  }  else {
     // Player-specific analysis
     const base = p.base_point || TOURNAMENT_MIN_BASE;
     const bid = toInt(inpBid.value, 0);
