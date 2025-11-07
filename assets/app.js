@@ -762,16 +762,20 @@ if (rating >= 6) {
         ]));
       });
   // ---- FULL PLAYER LIST (compact: one line "name  —  bid") ----
-const list = el("div", { class: "list" });
-      club.won.slice().reverse().forEach(pid => {
-        const p = state.players.find(x => x.id === pid); if (!p) return;
-        list.appendChild(el("div", { class: "li" }, [
-          ,
-          el("div", { class: "right" }, [
-           el("span", { class: "pill" }, )  
-          ])
-        ]));
-      });
+// Compact one-line "Name — [BID pill]"
+const list = el("div", { class: "list other-compact" });
+club.won.slice().reverse().forEach(pid => {
+  const p = state.players.find(x => x.id === pid); if (!p) return;
+  list.appendChild(
+    el("div", { class: "li", style:"display:flex;justify-content:space-between;align-items:center;gap:8px;" }, [
+      el("div", { class: "nm", style:"font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" }, [
+        document.createTextNode(p.name)
+      ]),
+      el("span", { class: "pill" }, [ document.createTextNode(String(p.final_bid)) ])
+    ])
+  );
+});
+
 
     
       const header = el("div", { class: "titlebar club-header" }, [
