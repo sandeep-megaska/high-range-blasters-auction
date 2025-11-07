@@ -741,46 +741,41 @@ if (rating >= 6) {
   }
 
   // ---------- other clubs (rich headers) ----------
- function renderOtherClubs() {
-  otherClubs.innerHTML = "";
-  const totalPts = state.totalPoints;
+  function renderOtherClubs() {
+    otherClubs.innerHTML = "";
 
-  CLUB_NAMES.filter(c => c !== MY_CLUB).forEach(c => {
-    const club = state.clubs[c];
-    const have = club.won.length;
-    const leftSlots = Math.max(0, state.squadSize - have);
-    const spent = Math.max(0, totalPts - club.budgetLeft);
-    const avgWin = have > 0 ? Math.round(spent / have) : 0;
-    const avgPerSlot = leftSlots > 0 ? Math.round(club.budgetLeft / leftSlots) : 0;
+    const totalPts = state.totalPoints;
 
-    // Header (kept)
-    const header = el("div", { class: "titlebar club-header" }, [
-      el("div", {}, [document.createTextNode(c)]),
-      el("div", { class: "titlebar-right" }, [
-        document.createTextNode(`Players ${have}/${state.squadSize} • Points Left ${club.budgetLeft} • Avg/slot ${avgPerSlot}`)
-      ])
-    ]);
-    const sub = el("div", { class: "titlebar-sub" }, [
-      document.createTextNode(`Spent ${spent} • Avg win ${avgWin}`)
-    ]);
+    CLUB_NAMES.filter(c => c !== MY_CLUB).forEach(c => {
+      const club = state.clubs[c];
+      const have = club.won.length;
+      const leftSlots = Math.max(0, state.squadSize - have);
+      const spent = Math.max(0, totalPts - club.budgetLeft);
+      const avgWin = have > 0 ? Math.round(spent / have) : 0;
+      const avgPerSlot = leftSlots > 0 ? Math.round(club.budgetLeft / leftSlots) : 0;
 
-    // Compact one-line list: "Name — Bid"
-    const list = el("div", { class: "list other-compact" });
-    club.won.slice().reverse().forEach(pid => {
-      const p = state.players.find(x => x.id === pid); if (!p) return;
-      list.appendChild(
-        el("div", { class: "li" }, [
-          el("div", { class: "nm" }, [ document.createTextNode(p.name) ]),
-          el("div", { class: "bd" }, [ document.createTextNode(String(p.final_bid)) ])
-        ])
-      );
-    });
+      const last3 = club.won.slice(-3).map(pid => state.players.find(x => x.id === pid)).filter(Boolean);
+      const chips = el("div", { class: "chips" });
+      last3.slice().reverse().forEach(p => {
+        chips.appendChild(el("div", { class: "chip" }, [
+          document.createTextNode(`${p.name} — ${p.final_bid}`)
+        ]));
+      });
 
-    const card = el("div", { class: "card stack" }, [header, sub, list]);
-    otherClubs.appendChild(card);
-  });
-}
-
+      // ---- FULL PLAYER LIST (compact: one line "name  —  bid") ----
+const list = el("div", { class: "list other-compact" });
+club.won.slice().reverse().forEach(pid => {
+  const p = state.players.find(x => x.id === pid); if (!p) return;
+  list.appendChild(
+    el("div", {
+      class: "li",
+      style: "display:flex;justify-content:space-between;align-items:center;"
+    }, [
+      el("div", { class: "tiny" }, [ document.createTextNode(p.name) ]),
+      el("div", { class: "tiny muted" }, [ document.createTextNode(String(p.final_bid)) ])
+    ])
+  );
+});
 
       const header = el("div", { class: "titlebar club-header" }, [
         el("div", {}, [document.createTextNode(c)]),
