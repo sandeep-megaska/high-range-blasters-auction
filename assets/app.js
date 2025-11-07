@@ -684,7 +684,7 @@ const player_rating = Math.max(0, Math.min(10, ratingRaw));
       if (rolesNow.wk<2 || rolesNow.lhb<2 || rolesNow.bowl<8) {
         msgs.push({ level:"warn", text:`Role needs pending → WK ${rolesNow.wk}/2, LHB ${rolesNow.lhb}/2, BOWL ${rolesNow.bowl}/8.` });
       }
-      return msgs;
+     
     }
 
     const base = p.base_point || TOURNAMENT_MIN_BASE;
@@ -776,6 +776,22 @@ if (capped1000.length) {
     text: `${names} can’t bid ≥ 1000 while keeping guardrail.`
   });
 }
+     // --- Rival guardrail caps under 1000 (always show, even if no active player) ---
+const capped1000 = CLUB_NAMES
+  .filter(n => n !== MY_CLUB)
+  .map(n => ({ name: n, cap: Math.max(0, clubHardCap(n)) }))
+  .filter(x => x.cap < 1000);
+
+if (capped1000.length) {
+  const names = capped1000.map(x => `${x.name} (~${x.cap})`).join(", ");
+  const psel = state.players.find(x => x.id === state.activeId);
+  const needsThousand = psel ? (psel.base_point >= 1000) : false;
+  msgs.push({
+    level: needsThousand ? "ok" : "info",
+    text: `${names} can’t bid ≥ 1000 while keeping guardrail.`
+  });
+}
+
 return msgs;
   }
   function renderAdvisor() {
