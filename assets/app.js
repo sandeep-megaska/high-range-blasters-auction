@@ -631,6 +631,14 @@ const player_rating = Math.max(0, Math.min(10, ratingRaw));
     });
     return count;
   }
+   function clubHardCap(name) {
+  const club = state.clubs[name];
+  const have = club.won.length;
+  const leftSlots = Math.max(0, state.squadSize - have);
+  const mustKeep = TOURNAMENT_MIN_BASE * leftSlots;
+  return club.budgetLeft - mustKeep; // max they can bid while keeping guardrail
+}
+
   function rivalsSnapshot() {
     let top = null;
     Object.keys(state.clubs).forEach(name => {
@@ -751,7 +759,24 @@ if (rating >= 6) {
     msgs.push({ level:"ok", text:`Suggested next bid: ${next} (step ${step}). Keep hard cap ${hardCapNow}, soft ~${safeCap}.` });
 
     msgs.push({ level:"info", text:`HRB: ${hrb.budgetLeft} pts, ${slots} slots → ~${avgPerSlotNow}/slot. If you win at ${bid}, left ${leftIfWin} → ~${slotsAfter>0?Math.round(leftIfWin/slotsAfter):0}/slot.` });
-    return msgs;
+   
+     // --- Rival guardrail caps under 1000 ---
+const capped1000 = CLUB_NAMES
+  .filter(n => n !== MY_CLUB)
+  .map(n => ({ name: n, cap: clubHardCap(n) }))
+  .filter(x => x.cap < 1000);
+
+if (capped1000.length) {
+  const names = capped1000.map(x => `${x.name} (~${x.cap})`).join(", ");
+  // If the current player needs >=1000 at base (Cat1/Cat2), this is strategically crucial.
+  const p = state.players.find(x => x.id === state.activeId);
+  const needsThousand = p ? (p.base_point >= 1000) : false;
+  msgs.push({
+    level: needsThousand ? "ok" : "info",
+    text: `${names} can’t bid ≥ 1000 while keeping guardrail.`
+  });
+}
+return msgs;
   }
   function renderAdvisor() {
     if (!advisorBox) return;
