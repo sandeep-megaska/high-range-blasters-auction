@@ -761,36 +761,7 @@ if (rating >= 6) {
     msgs.push({ level:"info", text:`HRB: ${hrb.budgetLeft} pts, ${slots} slots → ~${avgPerSlotNow}/slot. If you win at ${bid}, left ${leftIfWin} → ~${slotsAfter>0?Math.round(leftIfWin/slotsAfter):0}/slot.` });
    
      // --- Rival guardrail caps under 1000 ---
-const capped1000 = CLUB_NAMES
-  .filter(n => n !== MY_CLUB)
-  .map(n => ({ name: n, cap: clubHardCap(n) }))
-  .filter(x => x.cap < 1000);
 
-if (capped1000.length) {
-  const names = capped1000.map(x => `${x.name} (~${x.cap})`).join(", ");
-  // If the current player needs >=1000 at base (Cat1/Cat2), this is strategically crucial.
-  const p = state.players.find(x => x.id === state.activeId);
-  const needsThousand = p ? (p.base_point >= 1000) : false;
-  msgs.push({
-    level: needsThousand ? "ok" : "info",
-    text: `${names} can’t bid ≥ 1000 while keeping guardrail.`
-  });
-}
-     // --- Rival guardrail caps under 1000 (always show, even if no active player) ---
-const capped1000 = CLUB_NAMES
-  .filter(n => n !== MY_CLUB)
-  .map(n => ({ name: n, cap: Math.max(0, clubHardCap(n)) }))
-  .filter(x => x.cap < 1000);
-
-if (capped1000.length) {
-  const names = capped1000.map(x => `${x.name} (~${x.cap})`).join(", ");
-  const psel = state.players.find(x => x.id === state.activeId);
-  const needsThousand = psel ? (psel.base_point >= 1000) : false;
-  msgs.push({
-    level: needsThousand ? "ok" : "info",
-    text: `${names} can’t bid ≥ 1000 while keeping guardrail.`
-  });
-}
 
 return msgs;
   }
