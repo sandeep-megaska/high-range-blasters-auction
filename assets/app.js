@@ -631,13 +631,15 @@ const player_rating = Math.max(0, Math.min(10, ratingRaw));
     });
     return count;
   }
-   function clubHardCap(name) {
+   function clubMaxNextBid(name) {
   const club = state.clubs[name];
   const have = club.won.length;
   const leftSlots = Math.max(0, state.squadSize - have);
-  const mustKeep = TOURNAMENT_MIN_BASE * leftSlots;
-  return club.budgetLeft - mustKeep; // max they can bid while keeping guardrail
+  if (leftSlots <= 0) return 0; // no slots left => no bid
+  const mustKeepAfter = TOURNAMENT_MIN_BASE * (leftSlots - 1); // guardrail for remaining after this win
+  return club.budgetLeft - mustKeepAfter; // max you can bid now while preserving guardrail
 }
+
 
   function rivalsSnapshot() {
     let top = null;
@@ -771,16 +773,18 @@ const player_rating = Math.max(0, Math.min(10, ratingRaw));
   }
 
   // === ALWAYS append club max-bid (guardrail-aware), even with no selection ===
-  const capsAll = CLUB_NAMES.map(n => ({
-    name: n,
-    cap: Math.max(0, Math.round(clubHardCap(n)))
-  })).sort((a,b) => b.cap - a.cap);
+  // === ALWAYS append per-club max next-bid (guardrail-aware), even with no selection ===
+const capsAll = CLUB_NAMES.map(n => ({
+  name: n,
+  cap: Math.max(0, Math.round(clubMaxNextBid(n)))
+})).sort((a,b) => b.cap - a.cap);
 
-  msgs.push({ level: "info", text: "Max bid per club (guardrail-aware):" });
-  capsAll.forEach(x => {
-    const lvl = (x.name === MY_CLUB) ? "ok" : (x.cap < 1000 ? "warn" : "info");
-    msgs.push({ level: lvl, text: `${x.name}: ${x.cap}` });
-  });
+msgs.push({ level: "info", text: "Max next-bid per club (guardrail-aware):" });
+capsAll.forEach(x => {
+  const lvl = (x.name === MY_CLUB) ? "ok" : (x.cap < 1000 ? "warn" : "info");
+  msgs.push({ level: lvl, text: `${x.name}: ${x.cap}` });
+});
+
 
   return msgs;
 }
